@@ -238,14 +238,14 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 		case fraudProof := <-m.FraudProofInCh:
 			m.logger.Debug("fraud proof received",
 				"block height", fraudProof.BlockHeight,
-				"app hash", fraudProof.AppHash,
+				"pre-state app hash", fraudProof.PreStateAppHash,
+				"expected valid app hash", fraudProof.ExpectedValidAppHash,
 				"length of state witness", len(fraudProof.StateWitness),
 			)
 			// TODO(light-client): Set up a new cosmos-sdk app
 			// TODO: Add fraud proof window validation
 
-			// TODO(manav): Add expected app hash
-			success, err := m.executor.VerifyFraudProof(fraudProof, nil)
+			success, err := m.executor.VerifyFraudProof(fraudProof, fraudProof.ExpectedValidAppHash)
 			if err != nil {
 				m.logger.Error("failed to verify fraud proof", "error", err)
 				continue
