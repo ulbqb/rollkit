@@ -198,7 +198,7 @@ func createAndStartNodes(clientNodes int, isMalicious bool, t *testing.T) ([]*No
 	var wg sync.WaitGroup
 	aggCtx, aggCancel := context.WithCancel(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
-	nodes, apps := createNodes(aggCtx, ctx, clientNodes+1, true, &wg, t)
+	nodes, apps := createNodes(aggCtx, ctx, clientNodes+1, isMalicious, &wg, t)
 	startNodes(nodes, &wg, t)
 	aggCancel()
 	time.Sleep(100 * time.Millisecond)
