@@ -62,7 +62,8 @@ type Manager struct {
 	CommitInCh chan *types.Commit
 	lastCommit atomic.Value
 
-	FraudProofCh chan *types.FraudProof
+	FraudProofOutCh chan *abci.FraudProof
+	FraudProofInCh  chan *abci.FraudProof
 
 	syncTarget uint64
 	blockInCh  chan newBlockEvent
@@ -230,21 +231,25 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
 			}
-		case fraudProof := <-m.FraudProofCh:
-			m.logger.Debug("fraud proof received", "Block Height", "dummy block height") // TODO: Insert real block height
-			_ = fraudProof
+		case fraudProof := <-m.FraudProofInCh:
+			m.logger.Debug("fraud proof received",
+				"block height", fraudProof.BlockHeight,
+				"app hash", fraudProof.AppHash,
+				"length of state witness", len(fraudProof.StateWitness),
+			)
 			// TODO(light-client): Set up a new cosmos-sdk app
-			// How to get expected appHash here?
+			// TODO: Add fraud proof window validation
 
-			// success, err := m.executor.VerifyFraudProof(fraudProof, nil)
-			// if err != nil {
-			// 	m.logger.Error("failed to verify fraud proof", "error", err)
-			// 	continue
-			// }
-			// if success {
-			// 	// halt chain somehow
-			// 	defer context.WithCancel(ctx)
-			// }
+			success, err := m.executor.VerifyFraudProof(fraudProof, nil)
+			if err != nil {
+				m.logger.Error("failed to verify fraud proof", "error", err)
+				continue
+			}
+			if success {
+				// halt chain
+				m.logger.Info("verified fraud proof, halting chain")
+				defer context.WithCancel(ctx)
+			}
 
 		case <-ctx.Done():
 			return

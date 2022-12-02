@@ -209,6 +209,24 @@ func (n *Node) headerPublishLoop(ctx context.Context) {
 	}
 }
 
+func (n *Node) fraudProofPublishLoop(ctx context.Context) {
+	for {
+		select {
+		case fraudProof := <-n.blockManager.FraudProofOutCh:
+			fraudProofBytes, err := fraudProof.Marshal()
+			if err != nil {
+				n.Logger.Error("failed to serialize fraud proof", "error", err)
+			}
+			err = n.P2P.GossipFraudProof(ctx, fraudProofBytes)
+			if err != nil {
+				n.Logger.Error("failed to gossip fraud proof", "error", err)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // OnStart is a part of Service interface.
 func (n *Node) OnStart() error {
 	n.Logger.Info("starting P2P client")
@@ -227,6 +245,7 @@ func (n *Node) OnStart() error {
 	}
 	go n.blockManager.RetrieveLoop(n.ctx)
 	go n.blockManager.SyncLoop(n.ctx)
+	go n.fraudProofPublishLoop(n.ctx)
 
 	return nil
 }
@@ -355,14 +374,14 @@ func (n *Node) newCommitValidator() p2p.GossipValidator {
 func (n *Node) newFraudProofValidator() p2p.GossipValidator {
 	return func(fraudProofMsg *p2p.GossipMessage) bool {
 		n.Logger.Debug("fraud proof received", "from", fraudProofMsg.From, "bytes", len(fraudProofMsg.Data))
-		var fraudProof types.FraudProof
-		err := fraudProof.UnmarshalBinary(fraudProofMsg.Data)
+		var fraudProof *abci.FraudProof
+		err := fraudProof.Unmarshal(fraudProofMsg.Data)
 		if err != nil {
 			n.Logger.Error("failed to deserialize fraud proof", "error", err)
 			return false
 		}
 		// TODO(manav): Add validation checks for fraud proof here
-		n.blockManager.FraudProofCh <- &fraudProof
+		n.blockManager.FraudProofInCh <- fraudProof
 		return true
 	}
 }
