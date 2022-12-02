@@ -312,6 +312,10 @@ func createNode(ctx context.Context, n int, isMalicious bool, aggregator bool, d
 	if isMalicious && !aggregator {
 		app.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{FraudProof: &abci.FraudProof{}})
 	}
+	if isMalicious {
+		app.On("VerifyFraudProof", mock.Anything).Return(abci.ResponseVerifyFraudProof{Success: true})
+	}
+
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{}).Run(func(args mock.Arguments) {
 		wg.Done()
 	})

@@ -49,7 +49,7 @@ func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID strin
 		fraudProofsEnabled: fraudProofsEnabled,
 		eventBus:           eventBus,
 		logger:             logger,
-		FraudProofOutCh:    make(chan *abci.FraudProof),
+		FraudProofOutCh:    make(chan *abci.FraudProof, 100),
 	}
 }
 

@@ -143,7 +143,7 @@ func NewManager(
 		HeaderInCh:     make(chan *types.SignedHeader, 100),
 		CommitInCh:     make(chan *types.Commit, 100),
 		blockInCh:      make(chan newBlockEvent, 100),
-		FraudProofInCh: make(chan *abci.FraudProof),
+		FraudProofInCh: make(chan *abci.FraudProof, 100),
 		retrieveMtx:    new(sync.Mutex),
 		syncCache:      make(map[uint64]*types.Block),
 		logger:         logger,
