@@ -33,6 +33,8 @@ type BlockExecutor struct {
 	eventBus *tmtypes.EventBus
 
 	logger log.Logger
+
+	FraudProofOutCh chan *abci.FraudProof
 }
 
 // NewBlockExecutor creates new instance of BlockExecutor.
@@ -47,6 +49,7 @@ func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID strin
 		fraudProofsEnabled: fraudProofsEnabled,
 		eventBus:           eventBus,
 		logger:             logger,
+		FraudProofOutCh:    make(chan *abci.FraudProof),
 	}
 }
 
@@ -332,9 +335,8 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 			if err != nil {
 				return err
 			}
-			// TODO: gossip fraudProof to P2P network
-			// fraudTx: current DeliverTx
-			_ = fraudProof
+			// Gossip Fraud Proof
+			e.FraudProofOutCh <- fraudProof
 		}
 		currentIsrIndex++
 		return nil

@@ -62,8 +62,7 @@ type Manager struct {
 	CommitInCh chan *types.Commit
 	lastCommit atomic.Value
 
-	FraudProofOutCh chan *abci.FraudProof
-	FraudProofInCh  chan *abci.FraudProof
+	FraudProofInCh chan *abci.FraudProof
 
 	syncTarget uint64
 	blockInCh  chan newBlockEvent
@@ -140,13 +139,14 @@ func NewManager(
 		retriever:   dalc.(da.BlockRetriever), // TODO(tzdybal): do it in more gentle way (after MVP)
 		daHeight:    s.DAHeight,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
-		HeaderOutCh: make(chan *types.SignedHeader, 100),
-		HeaderInCh:  make(chan *types.SignedHeader, 100),
-		CommitInCh:  make(chan *types.Commit, 100),
-		blockInCh:   make(chan newBlockEvent, 100),
-		retrieveMtx: new(sync.Mutex),
-		syncCache:   make(map[uint64]*types.Block),
-		logger:      logger,
+		HeaderOutCh:    make(chan *types.SignedHeader, 100),
+		HeaderInCh:     make(chan *types.SignedHeader, 100),
+		CommitInCh:     make(chan *types.Commit, 100),
+		blockInCh:      make(chan newBlockEvent, 100),
+		FraudProofInCh: make(chan *abci.FraudProof),
+		retrieveMtx:    new(sync.Mutex),
+		syncCache:      make(map[uint64]*types.Block),
+		logger:         logger,
 	}
 	agg.retrieveCond = sync.NewCond(agg.retrieveMtx)
 
@@ -165,6 +165,10 @@ func getAddress(key crypto.PrivKey) ([]byte, error) {
 func (m *Manager) SetDALC(dalc da.DataAvailabilityLayerClient) {
 	m.dalc = dalc
 	m.retriever = dalc.(da.BlockRetriever)
+}
+
+func (m *Manager) GetFraudProofOutChan() chan *abci.FraudProof {
+	return m.executor.FraudProofOutCh
 }
 
 // AggregationLoop is responsible for aggregating transactions into rollup-blocks.
@@ -240,6 +244,7 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			// TODO(light-client): Set up a new cosmos-sdk app
 			// TODO: Add fraud proof window validation
 
+			// TODO(manav): Add expected app hash
 			success, err := m.executor.VerifyFraudProof(fraudProof, nil)
 			if err != nil {
 				m.logger.Error("failed to verify fraud proof", "error", err)

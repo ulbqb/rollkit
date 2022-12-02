@@ -212,7 +212,7 @@ func (n *Node) headerPublishLoop(ctx context.Context) {
 func (n *Node) fraudProofPublishLoop(ctx context.Context) {
 	for {
 		select {
-		case fraudProof := <-n.blockManager.FraudProofOutCh:
+		case fraudProof := <-n.blockManager.GetFraudProofOutChan():
 			fraudProofBytes, err := fraudProof.Marshal()
 			if err != nil {
 				n.Logger.Error("failed to serialize fraud proof", "error", err)
