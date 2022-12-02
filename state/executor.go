@@ -179,11 +179,11 @@ func (e *BlockExecutor) Commit(ctx context.Context, state types.State, block *ty
 	return appHash, retainHeight, nil
 }
 
-func (e *BlockExecutor) VerifyFraudProof(fraudProof *abci.FraudProof, expectedAppHash []byte) (bool, error) {
+func (e *BlockExecutor) VerifyFraudProof(fraudProof *abci.FraudProof, expectedValidAppHash []byte) (bool, error) {
 	resp, err := e.proxyApp.VerifyFraudProofSync(
 		abci.RequestVerifyFraudProof{
-			FraudProof:      fraudProof,
-			ExpectedAppHash: expectedAppHash,
+			FraudProof:           fraudProof,
+			ExpectedValidAppHash: expectedValidAppHash,
 		},
 	)
 	if err != nil {
