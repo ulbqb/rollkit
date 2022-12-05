@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	mrand "math/rand"
 	"strconv"
 	"strings"
@@ -127,9 +128,7 @@ func TestTxGossipingAndAggregation(t *testing.T) {
 			require.NoError(err)
 			nodeBlock, err := nodes[i].Store.LoadBlock(h)
 			require.NoError(err)
-			// Only Intermediate state roots set by block aggregator are relevant, removed for sake of comparison
-			nodeBlock.Data.IntermediateStateRoots.RawRootsList = nil
-			assert.Equal(aggBlock, nodeBlock)
+			assert.Equal(aggBlock, nodeBlock, fmt.Sprintf("height: %d", h))
 		}
 	}
 }
@@ -186,8 +185,6 @@ func TestFraudProofTrigger(t *testing.T) {
 			require.NoError(err)
 			aggBlock, err := nodes[0].Store.LoadBlock(h)
 			require.NoError(err)
-			// Only Intermediate state roots set by block aggregator are relevant, removed for sake of comparison
-			nodeBlock.Data.IntermediateStateRoots.RawRootsList = nil
 			assert.Equal(aggBlock, nodeBlock)
 		}
 	}
