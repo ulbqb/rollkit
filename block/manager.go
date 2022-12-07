@@ -253,7 +253,7 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			if success {
 				// halt chain
 				m.logger.Info("verified fraud proof, halting chain")
-				defer context.WithCancel(ctx)
+				// TOOD: Insert panic here
 			}
 
 		case <-ctx.Done():
