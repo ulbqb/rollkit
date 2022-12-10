@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"go.uber.org/multierr"
@@ -213,14 +214,18 @@ func (n *Node) fraudProofPublishLoop(ctx context.Context) {
 	for {
 		select {
 		case fraudProof := <-n.blockManager.GetFraudProofOutChan():
+			n.Logger.Info("generated a fraud proof: ", fraudProof.String())
 			fraudProofBytes, err := fraudProof.Marshal()
 			if err != nil {
 				n.Logger.Error("failed to serialize fraud proof", "error", err)
 			}
+			n.Logger.Info("gossipping fraud proof...")
 			err = n.P2P.GossipFraudProof(ctx, fraudProofBytes)
 			if err != nil {
 				n.Logger.Error("failed to gossip fraud proof", "error", err)
 			}
+			time.Sleep(5)
+			panic("halting full node...")
 		case <-ctx.Done():
 			return
 		}
