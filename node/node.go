@@ -214,7 +214,7 @@ func (n *Node) fraudProofPublishLoop(ctx context.Context) {
 	for {
 		select {
 		case fraudProof := <-n.blockManager.GetFraudProofOutChan():
-			n.Logger.Info("generated a fraud proof: ", fraudProof.String())
+			n.Logger.Info("generated fraud proof: ", fraudProof.String())
 			fraudProofBytes, err := fraudProof.Marshal()
 			if err != nil {
 				n.Logger.Error("failed to serialize fraud proof", "error", err)
