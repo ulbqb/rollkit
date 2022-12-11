@@ -251,9 +251,13 @@ func (n *Node) OnStart() error {
 		go n.blockManager.AggregationLoop(n.ctx)
 		go n.headerPublishLoop(n.ctx)
 	}
-	go n.blockManager.RetrieveLoop(n.ctx)
-	go n.blockManager.SyncLoop(n.ctx, n.cancel)
-	go n.fraudProofPublishLoop(n.ctx)
+	if !n.conf.FraudProofWatcher {
+		go n.blockManager.RetrieveLoop(n.ctx)
+		go n.blockManager.SyncLoop(n.ctx, n.cancel)
+		go n.fraudProofPublishLoop(n.ctx)
+	} else {
+		go n.blockManager.FraudProofWatcherSyncLoop(n.ctx)
+	}
 
 	return nil
 }

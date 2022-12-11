@@ -334,6 +334,7 @@ func createNode(ctx context.Context, n int, isMalicious bool, aggregator bool, d
 			DALayer:            "mock",
 			Aggregator:         aggregator,
 			BlockManagerConfig: bmConfig,
+			FraudProofWatcher:  false,
 		},
 		keys[n],
 		signingKey,

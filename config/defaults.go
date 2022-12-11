@@ -24,6 +24,7 @@ var DefaultNodeConfig = NodeConfig{
 		NamespaceID: types.NamespaceID{},
 		FraudProofs: false,
 	},
-	DALayer:  "mock",
-	DAConfig: "",
+	DALayer:           "mock",
+	DAConfig:          "",
+	FraudProofWatcher: false,
 }

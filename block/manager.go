@@ -266,6 +266,35 @@ func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 	}
 }
 
+func (m *Manager) FraudProofWatcherSyncLoop(ctx context.Context) {
+	m.logger.Info("Listening for fraud proofs...")
+	for {
+		select {
+		case fraudProof := <-m.FraudProofInCh:
+			m.logger.Debug("fraud proof received",
+				"block height", fraudProof.BlockHeight,
+				"pre-state app hash", fraudProof.PreStateAppHash,
+				"expected valid app hash", fraudProof.ExpectedValidAppHash,
+				"length of state witness", len(fraudProof.StateWitness),
+			)
+			// TODO(light-client): Set up a new cosmos-sdk app
+			// TODO: Add fraud proof window validation
+
+			success, err := m.executor.VerifyFraudProof(fraudProof, fraudProof.ExpectedValidAppHash)
+			if err != nil {
+				m.logger.Error("failed to verify fraud proof", "error", err)
+				continue
+			}
+			if success {
+				// halt chain
+				panic("verified fraud proof, halting chain")
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
 // trySyncNextBlock tries to progress one step (one block) in sync process.
 //
 // To be able to apply block and height h, we need to have its Commit. It is contained in block at height h+1.
