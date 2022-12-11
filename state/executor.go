@@ -369,7 +369,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 		return nil, err
 	}
 
-	deliverTxRequests := make([]*abci.RequestDeliverTx, len(block.Data.Txs))
+	deliverTxRequests := make([]*abci.RequestDeliverTx, 0, len(block.Data.Txs))
 	for _, tx := range block.Data.Txs {
 		deliverTxRequest := abci.RequestDeliverTx{Tx: tx}
 		deliverTxRequests = append(deliverTxRequests, &deliverTxRequest)
