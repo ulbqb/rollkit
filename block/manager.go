@@ -232,6 +232,9 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			m.retrieveCond.Signal()
 
 			err := m.trySyncNextBlock(ctx, daHeight)
+			if err == state.FraudProofGeneratedErr {
+				return
+			}
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
 			}
@@ -253,7 +256,7 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			if success {
 				// halt chain
 				m.logger.Info("verified fraud proof, halting chain")
-				// TOOD: Insert panic here
+				return
 			}
 
 		case <-ctx.Done():

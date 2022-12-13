@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"go.uber.org/multierr"
@@ -77,6 +76,8 @@ type Node struct {
 	// keep context here only because of API compatibility
 	// - it's used in `OnStart` (defined in service.Service interface)
 	ctx context.Context
+
+	cancel context.CancelFunc
 }
 
 // NewNode creates new rollmint node.
@@ -135,6 +136,8 @@ func NewNode(
 		return nil, fmt.Errorf("BlockManager initialization error: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+
 	node := &Node{
 		appClient:      appClient,
 		eventBus:       eventBus,
@@ -151,6 +154,7 @@ func NewNode(
 		IndexerService: indexerService,
 		BlockIndexer:   blockIndexer,
 		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	node.BaseService = *service.NewBaseService(logger, "Node", node)
@@ -220,12 +224,11 @@ func (n *Node) fraudProofPublishLoop(ctx context.Context) {
 				n.Logger.Error("failed to serialize fraud proof", "error", err)
 			}
 			n.Logger.Info("gossipping fraud proof...")
-			err = n.P2P.GossipFraudProof(ctx, fraudProofBytes)
+			err = n.P2P.GossipFraudProof(context.Background(), fraudProofBytes)
 			if err != nil {
 				n.Logger.Error("failed to gossip fraud proof", "error", err)
 			}
-			time.Sleep(5)
-			panic("halting full node...")
+			n.Stop()
 		case <-ctx.Done():
 			return
 		}
@@ -271,6 +274,8 @@ func (n *Node) GetGenesisChunks() ([]string, error) {
 
 // OnStop is a part of Service interface.
 func (n *Node) OnStop() {
+	n.Logger.Info("halting full node...")
+	n.cancel()
 	err := n.dalc.Stop()
 	err = multierr.Append(err, n.P2P.Close())
 	n.Logger.Error("errors while stopping node:", "errors", err)

@@ -21,6 +21,8 @@ import (
 	"github.com/celestiaorg/rollmint/types"
 )
 
+var FraudProofGeneratedErr = errors.New("halting node due to fraud")
+
 // BlockExecutor creates and applies blocks and maintains state.
 type BlockExecutor struct {
 	proposerAddress    []byte
@@ -339,7 +341,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 			fraudProof.ExpectedValidAppHash = isr
 			// Gossip Fraud Proof
 			e.FraudProofOutCh <- fraudProof
-			return errors.New("halting node due to fraud")
+			return FraudProofGeneratedErr
 		}
 		currentIsrIndex++
 		return nil
