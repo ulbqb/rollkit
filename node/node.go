@@ -228,7 +228,7 @@ func (n *Node) fraudProofPublishLoop(ctx context.Context) {
 			if err != nil {
 				n.Logger.Error("failed to gossip fraud proof", "error", err)
 			}
-			n.Stop()
+			_ = n.Stop()
 		case <-ctx.Done():
 			return
 		}

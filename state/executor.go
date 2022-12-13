@@ -333,7 +333,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 		ISRs = append(ISRs, isr)
 		isFraud := e.isFraudProofTrigger(isr, currentIsrs, currentIsrIndex)
 		if isFraud {
-			e.logger.Info("found fraud occurence, generating a fraud proof...")
+			e.logger.Info("found fraud occurrence, generating a fraud proof...")
 			fraudProof, err := e.generateFraudProof(beginBlockRequest, deliverTxRequests, endBlockRequest)
 			if err != nil {
 				return err
