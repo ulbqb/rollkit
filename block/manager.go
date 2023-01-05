@@ -193,7 +193,7 @@ func (m *Manager) AggregationLoop(ctx context.Context) {
 //
 // SyncLoop processes headers gossiped in P2p network to know what's the latest block height,
 // block data is retrieved from DA layer.
-func (m *Manager) SyncLoop(ctx context.Context) {
+func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 	daTicker := time.NewTicker(m.conf.DABlockTime)
 	for {
 		select {
@@ -232,7 +232,7 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			m.retrieveCond.Signal()
 
 			err := m.trySyncNextBlock(ctx, daHeight)
-			if err == state.FraudProofGeneratedErr {
+			if err == state.ErrFraudProofGenerated {
 				return
 			}
 			if err != nil {
@@ -256,6 +256,7 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 			if success {
 				// halt chain
 				m.logger.Info("verified fraud proof, halting chain")
+				cancel()
 				return
 			}
 
