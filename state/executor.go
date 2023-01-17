@@ -339,7 +339,6 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 			if err != nil {
 				return err
 			}
-			fraudProof.ExpectedValidAppHash = isr
 			// Gossip Fraud Proof
 			e.FraudProofOutCh <- fraudProof
 			return ErrFraudProofGenerated
