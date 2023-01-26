@@ -21,18 +21,26 @@ func (tx Tx) Hash() []byte {
 // Panics if i < 0 or i >= len(txs)
 // TODO: optimize this!
 func (txs Txs) Proof(i int) TxProof {
-	l := len(txs)
-	bzs := make([][]byte, l)
-	for i := 0; i < l; i++ {
-		bzs[i] = txs[i].Hash()
-	}
-	root, proofs := merkle.ProofsFromByteSlices(bzs)
-
+	root, proofs := txs.getMerkleProofs()
 	return TxProof{
 		RootHash: root,
 		Data:     txs[i],
 		Proof:    *proofs[i],
 	}
+}
+
+func (txs Txs) getMerkleProofs() (rootHash []byte, proofs []*merkle.Proof) {
+	l := len(txs)
+	bzs := make([][]byte, l)
+	for i := 0; i < l; i++ {
+		bzs[i] = txs[i].Hash()
+	}
+	return merkle.ProofsFromByteSlices(bzs)
+}
+
+func (txs Txs) getMerkleRoot() (rootHash []byte) {
+	rootHash, _ = txs.getMerkleProofs()
+	return rootHash
 }
 
 // TxProof represents a Merkle proof of the presence of a transaction in the Merkle tree.
