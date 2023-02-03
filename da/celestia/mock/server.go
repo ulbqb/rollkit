@@ -13,11 +13,12 @@ import (
 	mux2 "github.com/gorilla/mux"
 
 	"github.com/celestiaorg/go-cnc"
-	"github.com/celestiaorg/rollmint/da"
-	mockda "github.com/celestiaorg/rollmint/da/mock"
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
+
+	"github.com/rollkit/rollkit/da"
+	mockda "github.com/rollkit/rollkit/da/mock"
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/store"
+	"github.com/rollkit/rollkit/types"
 )
 
 // Server mocks celestia-node HTTP API.
@@ -39,7 +40,11 @@ func NewServer(blockTime time.Duration, logger log.Logger) *Server {
 
 // Start starts HTTP server with given listener.
 func (s *Server) Start(listener net.Listener) error {
-	err := s.mock.Init([8]byte{}, []byte(s.blockTime.String()), store.NewDefaultInMemoryKVStore(), s.logger)
+	kvStore, err := store.NewDefaultInMemoryKVStore()
+	if err != nil {
+		return err
+	}
+	err = s.mock.Init([8]byte{}, []byte(s.blockTime.String()), kvStore, s.logger)
 	if err != nil {
 		return err
 	}
@@ -92,7 +97,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := s.mock.SubmitBlock(&block)
+	res := s.mock.SubmitBlock(r.Context(), &block)
 	code := 0
 	if res.Code != da.StatusSuccess {
 		code = 3
@@ -118,7 +123,7 @@ func (s *Server) shares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := s.mock.RetrieveBlocks(height)
+	res := s.mock.RetrieveBlocks(r.Context(), height)
 	if res.Code != da.StatusSuccess {
 		s.writeError(w, errors.New(res.Message))
 		return
@@ -161,7 +166,7 @@ func (s *Server) data(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := s.mock.RetrieveBlocks(height)
+	res := s.mock.RetrieveBlocks(r.Context(), height)
 	if res.Code != da.StatusSuccess {
 		s.writeError(w, errors.New(res.Message))
 		return

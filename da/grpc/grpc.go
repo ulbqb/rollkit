@@ -7,11 +7,12 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/celestiaorg/rollmint/da"
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
-	"github.com/celestiaorg/rollmint/types/pb/dalc"
+	ds "github.com/ipfs/go-datastore"
+
+	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/types"
+	"github.com/rollkit/rollkit/types/pb/dalc"
 )
 
 // DataAvailabilityLayerClient is a generic client that proxies all DA requests via gRPC.
@@ -41,7 +42,7 @@ var _ da.DataAvailabilityLayerClient = &DataAvailabilityLayerClient{}
 var _ da.BlockRetriever = &DataAvailabilityLayerClient{}
 
 // Init sets the configuration options.
-func (d *DataAvailabilityLayerClient) Init(_ types.NamespaceID, config []byte, _ store.KVStore, logger log.Logger) error {
+func (d *DataAvailabilityLayerClient) Init(_ types.NamespaceID, config []byte, _ ds.Datastore, logger log.Logger) error {
 	d.logger = logger
 	if len(config) == 0 {
 		d.config = DefaultConfig
@@ -74,8 +75,8 @@ func (d *DataAvailabilityLayerClient) Stop() error {
 }
 
 // SubmitBlock proxies SubmitBlock request to gRPC server.
-func (d *DataAvailabilityLayerClient) SubmitBlock(block *types.Block) da.ResultSubmitBlock {
-	resp, err := d.client.SubmitBlock(context.TODO(), &dalc.SubmitBlockRequest{Block: block.ToProto()})
+func (d *DataAvailabilityLayerClient) SubmitBlock(ctx context.Context, block *types.Block) da.ResultSubmitBlock {
+	resp, err := d.client.SubmitBlock(ctx, &dalc.SubmitBlockRequest{Block: block.ToProto()})
 	if err != nil {
 		return da.ResultSubmitBlock{
 			BaseResult: da.BaseResult{Code: da.StatusError, Message: err.Error()},
@@ -91,8 +92,8 @@ func (d *DataAvailabilityLayerClient) SubmitBlock(block *types.Block) da.ResultS
 }
 
 // CheckBlockAvailability proxies CheckBlockAvailability request to gRPC server.
-func (d *DataAvailabilityLayerClient) CheckBlockAvailability(daHeight uint64) da.ResultCheckBlock {
-	resp, err := d.client.CheckBlockAvailability(context.TODO(), &dalc.CheckBlockAvailabilityRequest{DAHeight: daHeight})
+func (d *DataAvailabilityLayerClient) CheckBlockAvailability(ctx context.Context, daHeight uint64) da.ResultCheckBlock {
+	resp, err := d.client.CheckBlockAvailability(ctx, &dalc.CheckBlockAvailabilityRequest{DAHeight: daHeight})
 	if err != nil {
 		return da.ResultCheckBlock{BaseResult: da.BaseResult{Code: da.StatusError, Message: err.Error()}}
 	}
@@ -103,8 +104,8 @@ func (d *DataAvailabilityLayerClient) CheckBlockAvailability(daHeight uint64) da
 }
 
 // RetrieveBlocks proxies RetrieveBlocks request to gRPC server.
-func (d *DataAvailabilityLayerClient) RetrieveBlocks(daHeight uint64) da.ResultRetrieveBlocks {
-	resp, err := d.client.RetrieveBlocks(context.TODO(), &dalc.RetrieveBlocksRequest{DAHeight: daHeight})
+func (d *DataAvailabilityLayerClient) RetrieveBlocks(ctx context.Context, daHeight uint64) da.ResultRetrieveBlocks {
+	resp, err := d.client.RetrieveBlocks(ctx, &dalc.RetrieveBlocksRequest{DAHeight: daHeight})
 	if err != nil {
 		return da.ResultRetrieveBlocks{BaseResult: da.BaseResult{Code: da.StatusError, Message: err.Error()}}
 	}

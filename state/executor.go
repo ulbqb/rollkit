@@ -9,17 +9,20 @@ import (
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	cryptoenc "github.com/tendermint/tendermint/crypto/encoding"
+	tmbytes "github.com/tendermint/tendermint/libs/bytes"
 	tmstate "github.com/tendermint/tendermint/proto/tendermint/state"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"go.uber.org/multierr"
 
-	abciconv "github.com/celestiaorg/rollmint/conv/abci"
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/mempool"
-	"github.com/celestiaorg/rollmint/types"
+	abciconv "github.com/rollkit/rollkit/conv/abci"
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/mempool"
+	"github.com/rollkit/rollkit/types"
 )
+
+var ErrFraudProofGenerated = errors.New("failed to ApplyBlock: halting node due to fraud")
 
 // BlockExecutor creates and applies blocks and maintains state.
 type BlockExecutor struct {
@@ -33,6 +36,8 @@ type BlockExecutor struct {
 	eventBus *tmtypes.EventBus
 
 	logger log.Logger
+
+	FraudProofOutCh chan *abci.FraudProof
 }
 
 // NewBlockExecutor creates new instance of BlockExecutor.
@@ -47,6 +52,7 @@ func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID strin
 		fraudProofsEnabled: fraudProofsEnabled,
 		eventBus:           eventBus,
 		logger:             logger,
+		FraudProofOutCh:    make(chan *abci.FraudProof),
 	}
 }
 
@@ -86,7 +92,7 @@ func (e *BlockExecutor) InitChain(genesis *tmtypes.GenesisDoc) (*abci.ResponseIn
 }
 
 // CreateBlock reaps transactions from mempool and builds a block.
-func (e *BlockExecutor) CreateBlock(height uint64, lastCommit *types.Commit, lastHeaderHash [32]byte, state types.State) *types.Block {
+func (e *BlockExecutor) CreateBlock(height uint64, lastCommit *types.Commit, lastHeaderHash types.Hash, state types.State) *types.Block {
 	maxBytes := state.ConsensusParams.Block.MaxBytes
 	maxGas := state.ConsensusParams.Block.MaxGas
 
@@ -98,26 +104,29 @@ func (e *BlockExecutor) CreateBlock(height uint64, lastCommit *types.Commit, las
 				Block: state.Version.Consensus.Block,
 				App:   state.Version.Consensus.App,
 			},
-			NamespaceID:    e.namespaceID,
-			Height:         height,
-			Time:           uint64(time.Now().Unix()), // TODO(tzdybal): how to get TAI64?
-			LastHeaderHash: lastHeaderHash,
+			BaseHeader: types.BaseHeader{
+				ChainID: e.chainID,
+				Height:  height,
+				Time:    uint64(time.Now().Unix()), // TODO(tzdybal): how to get TAI64?
+			},
+			//LastHeaderHash: lastHeaderHash,
 			//LastCommitHash:  lastCommitHash,
-			DataHash:        [32]byte{},
-			ConsensusHash:   [32]byte{},
+			DataHash:        make(types.Hash, 32),
+			ConsensusHash:   make(types.Hash, 32),
 			AppHash:         state.AppHash,
 			LastResultsHash: state.LastResultsHash,
 			ProposerAddress: e.proposerAddress,
 		},
 		Data: types.Data{
-			Txs:                    toRollmintTxs(mempoolTxs),
+			Txs:                    toRollkitTxs(mempoolTxs),
 			IntermediateStateRoots: types.IntermediateStateRoots{RawRootsList: nil},
 			Evidence:               types.EvidenceData{Evidence: nil},
 		},
 		LastCommit: *lastCommit,
 	}
-	copy(block.Header.LastCommitHash[:], e.getLastCommitHash(lastCommit, &block.Header))
-	copy(block.Header.AggregatorsHash[:], state.Validators.Hash())
+	block.Header.LastCommitHash = e.getLastCommitHash(lastCommit, &block.Header)
+	block.Header.LastHeaderHash = lastHeaderHash
+	block.Header.AggregatorsHash = state.Validators.Hash()
 
 	return block
 }
@@ -167,7 +176,7 @@ func (e *BlockExecutor) Commit(ctx context.Context, state types.State, block *ty
 		return []byte{}, 0, err
 	}
 
-	copy(state.AppHash[:], appHash[:])
+	state.AppHash = appHash
 
 	err = e.publishEvents(resp, block, state)
 	if err != nil {
@@ -176,11 +185,11 @@ func (e *BlockExecutor) Commit(ctx context.Context, state types.State, block *ty
 	return appHash, retainHeight, nil
 }
 
-func (e *BlockExecutor) VerifyFraudProof(fraudProof abci.FraudProof, expectedAppHash []byte) (bool, error) {
+func (e *BlockExecutor) VerifyFraudProof(fraudProof *abci.FraudProof, expectedValidAppHash []byte) (bool, error) {
 	resp, err := e.proxyApp.VerifyFraudProofSync(
 		abci.RequestVerifyFraudProof{
-			FraudProof:      &fraudProof,
-			ExpectedAppHash: expectedAppHash,
+			FraudProof:           fraudProof,
+			ExpectedValidAppHash: expectedValidAppHash,
 		},
 	)
 	if err != nil {
@@ -193,7 +202,7 @@ func (e *BlockExecutor) VerifyFraudProof(fraudProof abci.FraudProof, expectedApp
 func (e *BlockExecutor) updateState(state types.State, block *types.Block, abciResponses *tmstate.ABCIResponses, validatorUpdates []*tmtypes.Validator) (types.State, error) {
 	nValSet := state.NextValidators.Copy()
 	lastHeightValSetChanged := state.LastHeightValidatorsChanged
-	// rollmint can work without validators
+	// Rollkit can work without validators
 	if len(nValSet.Validators) > 0 {
 		if len(validatorUpdates) > 0 {
 			err := nValSet.UpdateWithChangeSet(validatorUpdates)
@@ -201,22 +210,21 @@ func (e *BlockExecutor) updateState(state types.State, block *types.Block, abciR
 				return state, nil
 			}
 			// Change results from this height but only applies to the next next height.
-			lastHeightValSetChanged = int64(block.Header.Height + 1 + 1)
+			lastHeightValSetChanged = block.Header.Height() + 1 + 1
 		}
 
 		// TODO(tzdybal):  right now, it's for backward compatibility, may need to change this
 		nValSet.IncrementProposerPriority(1)
 	}
 
-	hash := block.Header.Hash()
 	s := types.State{
 		Version:         state.Version,
 		ChainID:         state.ChainID,
 		InitialHeight:   state.InitialHeight,
-		LastBlockHeight: int64(block.Header.Height),
-		LastBlockTime:   time.Unix(int64(block.Header.Time), 0),
+		LastBlockHeight: block.Header.Height(),
+		LastBlockTime:   block.Header.Time(),
 		LastBlockID: tmtypes.BlockID{
-			Hash: hash[:],
+			Hash: tmbytes.HexBytes(block.Header.Hash()),
 			// for now, we don't care about part set headers
 		},
 		NextValidators:                   nValSet,
@@ -225,7 +233,7 @@ func (e *BlockExecutor) updateState(state types.State, block *types.Block, abciR
 		LastHeightValidatorsChanged:      lastHeightValSetChanged,
 		ConsensusParams:                  state.ConsensusParams,
 		LastHeightConsensusParamsChanged: state.LastHeightConsensusParamsChanged,
-		AppHash:                          [32]byte{},
+		AppHash:                          make(types.Hash, 32),
 	}
 	copy(s.LastResultsHash[:], tmtypes.NewResults(abciResponses.DeliverTxs).Hash())
 
@@ -248,7 +256,7 @@ func (e *BlockExecutor) commit(ctx context.Context, state types.State, block *ty
 
 	maxBytes := state.ConsensusParams.Block.MaxBytes
 	maxGas := state.ConsensusParams.Block.MaxGas
-	err = e.mempool.Update(int64(block.Header.Height), fromRollmintTxs(block.Data.Txs), deliverTxs, mempool.PreCheckMaxBytes(maxBytes), mempool.PostCheckMaxGas(maxGas))
+	err = e.mempool.Update(int64(block.Header.Height()), fromRollkitTxs(block.Data.Txs), deliverTxs, mempool.PreCheckMaxBytes(maxBytes), mempool.PostCheckMaxGas(maxGas))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -265,10 +273,10 @@ func (e *BlockExecutor) validate(state types.State, block *types.Block) error {
 		block.Header.Version.Block != state.Version.Consensus.Block {
 		return errors.New("block version mismatch")
 	}
-	if state.LastBlockHeight <= 0 && block.Header.Height != uint64(state.InitialHeight) {
+	if state.LastBlockHeight <= 0 && block.Header.Height() != state.InitialHeight {
 		return errors.New("initial block height mismatch")
 	}
-	if state.LastBlockHeight > 0 && block.Header.Height != uint64(state.LastBlockHeight)+1 {
+	if state.LastBlockHeight > 0 && block.Header.Height() != state.LastBlockHeight+1 {
 		return errors.New("block height mismatch")
 	}
 	if !bytes.Equal(block.Header.AppHash[:], state.AppHash[:]) {
@@ -328,13 +336,14 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 		ISRs = append(ISRs, isr)
 		isFraud := e.isFraudProofTrigger(isr, currentIsrs, currentIsrIndex)
 		if isFraud {
+			e.logger.Info("found fraud occurrence, generating a fraud proof...")
 			fraudProof, err := e.generateFraudProof(beginBlockRequest, deliverTxRequests, endBlockRequest)
 			if err != nil {
 				return err
 			}
-			// TODO: gossip fraudProof to P2P network
-			// fraudTx: current DeliverTx
-			_ = fraudProof
+			// Gossip Fraud Proof
+			e.FraudProofOutCh <- fraudProof
+			return ErrFraudProofGenerated
 		}
 		currentIsrIndex++
 		return nil
@@ -366,7 +375,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 		return nil, err
 	}
 
-	deliverTxRequests := make([]*abci.RequestDeliverTx, len(block.Data.Txs))
+	deliverTxRequests := make([]*abci.RequestDeliverTx, 0, len(block.Data.Txs))
 	for _, tx := range block.Data.Txs {
 		deliverTxRequest := abci.RequestDeliverTx{Tx: tx}
 		deliverTxRequests = append(deliverTxRequests, &deliverTxRequest)
@@ -380,7 +389,7 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 			return nil, err
 		}
 	}
-	endBlockRequest := abci.RequestEndBlock{Height: int64(block.Header.Height)}
+	endBlockRequest := abci.RequestEndBlock{Height: block.Header.Height()}
 	abciResponses.EndBlock, err = e.proxyApp.EndBlockSync(endBlockRequest)
 	if err != nil {
 		return nil, err
@@ -437,7 +446,7 @@ func (e *BlockExecutor) getLastCommitHash(lastCommit *types.Commit, header *type
 	lastABCICommit := abciconv.ToABCICommit(lastCommit)
 	if len(lastCommit.Signatures) == 1 {
 		lastABCICommit.Signatures[0].ValidatorAddress = e.proposerAddress
-		lastABCICommit.Signatures[0].Timestamp = time.UnixMilli(int64(header.Time))
+		lastABCICommit.Signatures[0].Timestamp = header.Time()
 	}
 	return lastABCICommit.Hash()
 }
@@ -467,13 +476,13 @@ func (e *BlockExecutor) publishEvents(resp *tmstate.ABCIResponses, block *types.
 	for _, ev := range abciBlock.Evidence.Evidence {
 		err = multierr.Append(err, e.eventBus.PublishEventNewEvidence(tmtypes.EventDataNewEvidence{
 			Evidence: ev,
-			Height:   int64(block.Header.Height),
+			Height:   block.Header.Height(),
 		}))
 	}
 	for i, dtx := range resp.DeliverTxs {
 		err = multierr.Append(err, e.eventBus.PublishEventTx(tmtypes.EventDataTx{
 			TxResult: abci.TxResult{
-				Height: int64(block.Header.Height),
+				Height: block.Header.Height(),
 				Index:  uint32(i),
 				Tx:     abciBlock.Data.Txs[i],
 				Result: *dtx,
@@ -491,18 +500,18 @@ func (e *BlockExecutor) getAppHash() ([]byte, error) {
 	return isrResp.AppHash, nil
 }
 
-func toRollmintTxs(txs tmtypes.Txs) types.Txs {
-	rollmintTxs := make(types.Txs, len(txs))
+func toRollkitTxs(txs tmtypes.Txs) types.Txs {
+	rollkitTxs := make(types.Txs, len(txs))
 	for i := range txs {
-		rollmintTxs[i] = []byte(txs[i])
+		rollkitTxs[i] = []byte(txs[i])
 	}
-	return rollmintTxs
+	return rollkitTxs
 }
 
-func fromRollmintTxs(rollmintTxs types.Txs) tmtypes.Txs {
-	txs := make(tmtypes.Txs, len(rollmintTxs))
-	for i := range rollmintTxs {
-		txs[i] = []byte(rollmintTxs[i])
+func fromRollkitTxs(rollkitTxs types.Txs) tmtypes.Txs {
+	txs := make(tmtypes.Txs, len(rollkitTxs))
+	for i := range rollkitTxs {
+		txs[i] = []byte(rollkitTxs[i])
 	}
 	return txs
 }

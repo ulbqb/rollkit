@@ -14,7 +14,7 @@ import (
 	tmversion "github.com/tendermint/tendermint/proto/tendermint/version"
 	tmtypes "github.com/tendermint/tendermint/types"
 
-	pb "github.com/celestiaorg/rollmint/types/pb/rollmint"
+	pb "github.com/rollkit/rollkit/types/pb/rollkit"
 )
 
 func TestBlockSerializationRoundTrip(t *testing.T) {
@@ -23,9 +23,9 @@ func TestBlockSerializationRoundTrip(t *testing.T) {
 	require := require.New(t)
 
 	// create random hashes
-	h := [][32]byte{}
+	h := []Hash{}
 	for i := 0; i < 8; i++ {
-		var h1 [32]byte
+		h1 := make(Hash, 32)
 		n, err := rand.Read(h1[:])
 		require.Equal(32, n)
 		require.NoError(err)
@@ -43,9 +43,10 @@ func TestBlockSerializationRoundTrip(t *testing.T) {
 					Block: 1,
 					App:   2,
 				},
-				NamespaceID:     NamespaceID{0, 1, 2, 3, 4, 5, 6, 7},
-				Height:          3,
-				Time:            4567,
+				BaseHeader: BaseHeader{
+					Height: 3,
+					Time:   4567,
+				},
 				LastHeaderHash:  h[0],
 				LastCommitHash:  h[1],
 				DataHash:        h[2],
@@ -63,7 +64,7 @@ func TestBlockSerializationRoundTrip(t *testing.T) {
 			},
 			LastCommit: Commit{
 				Height:     8,
-				HeaderHash: h[7],
+				HeaderHash: h[7][:],
 				Signatures: []Signature{Signature([]byte{1, 1, 1}), Signature([]byte{2, 2, 2})},
 			},
 		}},
@@ -117,7 +118,7 @@ func TestStateRoundTrip(t *testing.T) {
 						Block: 123,
 						App:   456,
 					},
-					Software: "rollmint",
+					Software: "rollkit",
 				},
 				ChainID:         "testchain",
 				InitialHeight:   987,
@@ -154,8 +155,8 @@ func TestStateRoundTrip(t *testing.T) {
 					},
 				},
 				LastHeightConsensusParamsChanged: 12345,
-				LastResultsHash:                  [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2},
-				AppHash:                          [32]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1},
+				LastResultsHash:                  Hash{1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2},
+				AppHash:                          Hash{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1},
 			},
 		},
 	}
@@ -181,40 +182,6 @@ func TestStateRoundTrip(t *testing.T) {
 			require.NoError(err)
 
 			assert.Equal(c.state, newState)
-		})
-	}
-}
-
-func TestFraudProofSerializationRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name  string
-		input *FraudProof
-	}{
-		{"fp", &FraudProof{
-			BlockHeight: 1234,
-			StateWitness: StateWitness{
-				WitnessData: []WitnessData{
-					{Key: []byte{1, 2}, Value: []byte{3, 4}},
-					{Key: []byte{5, 6}, Value: []byte{7, 8}},
-				},
-			},
-		},
-		}}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			assert := assert.New(t)
-			blob, err := c.input.MarshalBinary()
-			assert.NoError(err)
-			assert.NotEmpty(blob)
-
-			deserialized := &FraudProof{}
-			err = deserialized.UnmarshalBinary(blob)
-			assert.NoError(err)
-
-			assert.Equal(c.input, deserialized)
 		})
 	}
 }

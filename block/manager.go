@@ -15,19 +15,19 @@ import (
 	tmtypes "github.com/tendermint/tendermint/types"
 	"go.uber.org/multierr"
 
-	"github.com/celestiaorg/rollmint/config"
-	"github.com/celestiaorg/rollmint/da"
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/mempool"
-	"github.com/celestiaorg/rollmint/state"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
+	"github.com/rollkit/rollkit/config"
+	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/mempool"
+	"github.com/rollkit/rollkit/state"
+	"github.com/rollkit/rollkit/store"
+	"github.com/rollkit/rollkit/types"
 )
 
 // defaultDABlockTime is used only if DABlockTime is not configured for manager
 const defaultDABlockTime = 30 * time.Second
 
-// maxSubmitAttempts defines how many times rollmint will re-try to publish block to DA layer.
+// maxSubmitAttempts defines how many times Rollkit will re-try to publish block to DA layer.
 // This is temporary solution. It will be removed in future versions.
 const maxSubmitAttempts = 30
 
@@ -59,10 +59,9 @@ type Manager struct {
 	HeaderOutCh chan *types.SignedHeader
 	HeaderInCh  chan *types.SignedHeader
 
-	CommitInCh chan *types.Commit
 	lastCommit atomic.Value
 
-	FraudProofCh chan *types.FraudProof
+	FraudProofInCh chan *abci.FraudProof
 
 	syncTarget uint64
 	blockInCh  chan newBlockEvent
@@ -139,13 +138,13 @@ func NewManager(
 		retriever:   dalc.(da.BlockRetriever), // TODO(tzdybal): do it in more gentle way (after MVP)
 		daHeight:    s.DAHeight,
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
-		HeaderOutCh: make(chan *types.SignedHeader, 100),
-		HeaderInCh:  make(chan *types.SignedHeader, 100),
-		CommitInCh:  make(chan *types.Commit, 100),
-		blockInCh:   make(chan newBlockEvent, 100),
-		retrieveMtx: new(sync.Mutex),
-		syncCache:   make(map[uint64]*types.Block),
-		logger:      logger,
+		HeaderOutCh:    make(chan *types.SignedHeader, 100),
+		HeaderInCh:     make(chan *types.SignedHeader, 100),
+		blockInCh:      make(chan newBlockEvent, 100),
+		FraudProofInCh: make(chan *abci.FraudProof, 100),
+		retrieveMtx:    new(sync.Mutex),
+		syncCache:      make(map[uint64]*types.Block),
+		logger:         logger,
 	}
 	agg.retrieveCond = sync.NewCond(agg.retrieveMtx)
 
@@ -166,9 +165,30 @@ func (m *Manager) SetDALC(dalc da.DataAvailabilityLayerClient) {
 	m.retriever = dalc.(da.BlockRetriever)
 }
 
+func (m *Manager) GetFraudProofOutChan() chan *abci.FraudProof {
+	return m.executor.FraudProofOutCh
+}
+
 // AggregationLoop is responsible for aggregating transactions into rollup-blocks.
 func (m *Manager) AggregationLoop(ctx context.Context) {
+	initialHeight := uint64(m.genesis.InitialHeight)
+	height := m.store.Height()
+	var delay time.Duration
+
+	// TODO(tzdybal): double-check when https://github.com/celestiaorg/rollmint/issues/699 is resolved
+	if height < initialHeight {
+		delay = time.Until(m.genesis.GenesisTime)
+	} else {
+		delay = time.Until(m.lastState.LastBlockTime.Add(m.conf.BlockTime))
+	}
+
+	if delay > 0 {
+		m.logger.Info("Waiting to produce block", "delay", delay)
+		time.Sleep(delay)
+	}
+
 	timer := time.NewTimer(0)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,15 +208,15 @@ func (m *Manager) AggregationLoop(ctx context.Context) {
 //
 // SyncLoop processes headers gossiped in P2p network to know what's the latest block height,
 // block data is retrieved from DA layer.
-func (m *Manager) SyncLoop(ctx context.Context) {
+func (m *Manager) SyncLoop(ctx context.Context, cancel context.CancelFunc) {
 	daTicker := time.NewTicker(m.conf.DABlockTime)
 	for {
 		select {
 		case <-daTicker.C:
 			m.retrieveCond.Signal()
 		case header := <-m.HeaderInCh:
-			m.logger.Debug("block header received", "height", header.Header.Height, "hash", header.Header.Hash())
-			newHeight := header.Header.Height
+			m.logger.Debug("block header received", "height", header.Header.Height(), "hash", header.Header.Hash())
+			newHeight := header.Header.BaseHeader.Height
 			currentHeight := m.store.Height()
 			// in case of client reconnecting after being offline
 			// newHeight may be significantly larger than currentHeight
@@ -205,15 +225,14 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 				atomic.StoreUint64(&m.syncTarget, newHeight)
 				m.retrieveCond.Signal()
 			}
-			m.CommitInCh <- &header.Commit
-		case commit := <-m.CommitInCh:
+			commit := &header.Commit
 			// TODO(tzdybal): check if it's from right aggregator
 			m.lastCommit.Store(commit)
 			err := m.trySyncNextBlock(ctx, 0)
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
 			} else {
-				m.logger.Debug("synced using gossiped commit", "height", commit.Height)
+				m.logger.Debug("synced using signed header", "height", commit.Height)
 			}
 		case blockEvent := <-m.blockInCh:
 			block := blockEvent.block
@@ -223,28 +242,37 @@ func (m *Manager) SyncLoop(ctx context.Context) {
 				"daHeight", daHeight,
 				"hash", block.Hash(),
 			)
-			m.syncCache[block.Header.Height] = block
+			m.syncCache[block.Header.BaseHeader.Height] = block
 			m.retrieveCond.Signal()
 
 			err := m.trySyncNextBlock(ctx, daHeight)
+			if err != nil && err.Error() == fmt.Errorf("failed to ApplyBlock: %w", state.ErrFraudProofGenerated).Error() {
+				return
+			}
 			if err != nil {
 				m.logger.Info("failed to sync next block", "error", err)
 			}
-		case fraudProof := <-m.FraudProofCh:
-			m.logger.Debug("fraud proof received", "Block Height", "dummy block height") // TODO: Insert real block height
-			_ = fraudProof
+		case fraudProof := <-m.FraudProofInCh:
+			m.logger.Debug("fraud proof received",
+				"block height", fraudProof.BlockHeight,
+				"pre-state app hash", fraudProof.PreStateAppHash,
+				"expected valid app hash", fraudProof.ExpectedValidAppHash,
+				"length of state witness", len(fraudProof.StateWitness),
+			)
 			// TODO(light-client): Set up a new cosmos-sdk app
-			// How to get expected appHash here?
+			// TODO: Add fraud proof window validation
 
-			// success, err := m.executor.VerifyFraudProof(fraudProof, nil)
-			// if err != nil {
-			// 	m.logger.Error("failed to verify fraud proof", "error", err)
-			// 	continue
-			// }
-			// if success {
-			// 	// halt chain somehow
-			// 	defer context.WithCancel(ctx)
-			// }
+			success, err := m.executor.VerifyFraudProof(fraudProof, fraudProof.ExpectedValidAppHash)
+			if err != nil {
+				m.logger.Error("failed to verify fraud proof", "error", err)
+				continue
+			}
+			if success {
+				// halt chain
+				m.logger.Info("verified fraud proof, halting chain")
+				cancel()
+				return
+			}
 
 		case <-ctx.Done():
 			return
@@ -279,7 +307,7 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 	}
 
 	if b1 != nil && commit != nil {
-		m.logger.Info("Syncing block", "height", b1.Header.Height)
+		m.logger.Info("Syncing block", "height", b1.Header.Height())
 		newState, responses, err := m.executor.ApplyBlock(ctx, m.lastState, b1)
 		if err != nil {
 			return fmt.Errorf("failed to ApplyBlock: %w", err)
@@ -292,9 +320,9 @@ func (m *Manager) trySyncNextBlock(ctx context.Context, daHeight uint64) error {
 		if err != nil {
 			return fmt.Errorf("failed to Commit: %w", err)
 		}
-		m.store.SetHeight(b1.Header.Height)
+		m.store.SetHeight(uint64(b1.Header.Height()))
 
-		err = m.store.SaveBlockResponses(b1.Header.Height, responses)
+		err = m.store.SaveBlockResponses(uint64(b1.Header.Height()), responses)
 		if err != nil {
 			return fmt.Errorf("failed to save block responses: %w", err)
 		}
@@ -345,7 +373,7 @@ func (m *Manager) RetrieveLoop(ctx context.Context) {
 			for {
 				daHeight := atomic.LoadUint64(&m.daHeight)
 				m.logger.Debug("retrieve", "daHeight", daHeight)
-				err := m.processNextDABlock()
+				err := m.processNextDABlock(ctx)
 				if err != nil {
 					m.logger.Error("failed to retrieve block from DALC", "daHeight", daHeight, "errors", err.Error())
 					break
@@ -358,7 +386,7 @@ func (m *Manager) RetrieveLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) processNextDABlock() error {
+func (m *Manager) processNextDABlock(ctx context.Context) error {
 	// TODO(tzdybal): extract configuration option
 	maxRetries := 10
 	daHeight := atomic.LoadUint64(&m.daHeight)
@@ -366,7 +394,7 @@ func (m *Manager) processNextDABlock() error {
 	var err error
 	m.logger.Debug("trying to retrieve block from DA", "daHeight", daHeight)
 	for r := 0; r < maxRetries; r++ {
-		blockResp, fetchErr := m.fetchBlock(daHeight)
+		blockResp, fetchErr := m.fetchBlock(ctx, daHeight)
 		if fetchErr != nil {
 			err = multierr.Append(err, fetchErr)
 			time.Sleep(100 * time.Millisecond)
@@ -381,9 +409,9 @@ func (m *Manager) processNextDABlock() error {
 	return err
 }
 
-func (m *Manager) fetchBlock(daHeight uint64) (da.ResultRetrieveBlocks, error) {
+func (m *Manager) fetchBlock(ctx context.Context, daHeight uint64) (da.ResultRetrieveBlocks, error) {
 	var err error
-	blockRes := m.retriever.RetrieveBlocks(daHeight)
+	blockRes := m.retriever.RetrieveBlocks(ctx, daHeight)
 	switch blockRes.Code {
 	case da.StatusError:
 		err = fmt.Errorf("failed to retrieve block: %s", blockRes.Message)
@@ -402,16 +430,32 @@ func (m *Manager) getRemainingSleep(start time.Time) time.Duration {
 	return sleepDuration
 }
 
+func (m *Manager) getCommit(header types.Header) (*types.Commit, error) {
+	headerBytes, err := header.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	sign, err := m.proposerKey.Sign(headerBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &types.Commit{
+		Height:     uint64(header.Height()),
+		HeaderHash: header.Hash(),
+		Signatures: []types.Signature{sign},
+	}, nil
+}
+
 func (m *Manager) publishBlock(ctx context.Context) error {
 	var lastCommit *types.Commit
-	var lastHeaderHash [32]byte
+	var lastHeaderHash types.Hash
 	var err error
 	height := m.store.Height()
 	newHeight := height + 1
 
 	// this is a special case, when first block is produced - there is no previous commit
 	if newHeight == uint64(m.genesis.InitialHeight) {
-		lastCommit = &types.Commit{Height: height, HeaderHash: [32]byte{}}
+		lastCommit = &types.Commit{Height: height}
 	} else {
 		lastCommit, err = m.store.LoadCommit(height)
 		if err != nil {
@@ -438,18 +482,9 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 		block = m.executor.CreateBlock(newHeight, lastCommit, lastHeaderHash, m.lastState)
 		m.logger.Debug("block info", "num_tx", len(block.Data.Txs))
 
-		headerBytes, err := block.Header.MarshalBinary()
+		commit, err := m.getCommit(block.Header)
 		if err != nil {
 			return err
-		}
-		sign, err := m.proposerKey.Sign(headerBytes)
-		if err != nil {
-			return err
-		}
-		commit = &types.Commit{
-			Height:     block.Header.Height,
-			HeaderHash: block.Header.Hash(),
-			Signatures: []types.Signature{sign},
 		}
 
 		// SaveBlock commits the DB tx
@@ -461,6 +496,20 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 
 	// Apply the block but DONT commit
 	newState, responses, err := m.executor.ApplyBlock(ctx, m.lastState, block)
+
+	if err != nil {
+		return err
+	}
+
+	if commit == nil {
+		commit, err = m.getCommit(block.Header)
+		if err != nil {
+			return err
+		}
+	}
+
+	// SaveBlock commits the DB tx
+	err = m.store.SaveBlock(block, commit)
 	if err != nil {
 		return err
 	}
@@ -478,7 +527,7 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 	}
 
 	// SaveBlockResponses commits the DB tx
-	err = m.store.SaveBlockResponses(block.Header.Height, responses)
+	err = m.store.SaveBlockResponses(uint64(block.Header.Height()), responses)
 	if err != nil {
 		return err
 	}
@@ -494,13 +543,13 @@ func (m *Manager) publishBlock(ctx context.Context) error {
 	}
 
 	// SaveValidators commits the DB tx
-	err = m.store.SaveValidators(block.Header.Height, m.lastState.Validators)
+	err = m.store.SaveValidators(uint64(block.Header.Height()), m.lastState.Validators)
 	if err != nil {
 		return err
 	}
 
 	// Only update the stored height after successfully submitting to DA layer and committing to the DB
-	m.store.SetHeight(block.Header.Height)
+	m.store.SetHeight(uint64(block.Header.Height()))
 
 	m.publishSignedHeader(block, commit)
 
@@ -513,9 +562,9 @@ func (m *Manager) submitBlockToDA(ctx context.Context, block *types.Block) error
 	submitted := false
 	backoff := initialBackoff
 	for attempt := 1; ctx.Err() == nil && !submitted && attempt <= maxSubmitAttempts; attempt++ {
-		res := m.dalc.SubmitBlock(block)
+		res := m.dalc.SubmitBlock(ctx, block)
 		if res.Code == da.StatusSuccess {
-			m.logger.Info("successfully submitted rollmint block to DA layer", "rollmintHeight", block.Header.Height, "daHeight", res.DAHeight)
+			m.logger.Info("successfully submitted Rollkit block to DA layer", "rollkitHeight", block.Header.Height, "daHeight", res.DAHeight)
 			submitted = true
 		} else {
 			m.logger.Error("DA layer submission failed", "error", res.Message, "attempt", attempt)
@@ -549,7 +598,7 @@ func updateState(s *types.State, res *abci.ResponseInitChain) {
 	// the state. We don't set appHash since we don't want the genesis doc app hash
 	// recorded in the genesis block. We should probably just remove GenesisDoc.AppHash.
 	if len(res.AppHash) > 0 {
-		copy(s.AppHash[:], res.AppHash)
+		s.AppHash = res.AppHash
 	}
 
 	if res.ConsensusParams != nil {
@@ -574,7 +623,7 @@ func updateState(s *types.State, res *abci.ResponseInitChain) {
 		s.Version.Consensus.App = s.ConsensusParams.Version.AppVersion
 	}
 	// We update the last results hash with the empty hash, to conform with RFC-6962.
-	copy(s.LastResultsHash[:], merkle.HashFromByteSlices(nil))
+	s.LastResultsHash = merkle.HashFromByteSlices(nil)
 
 	if len(res.Validators) > 0 {
 		vals, err := tmtypes.PB2TM.ValidatorUpdates(res.Validators)

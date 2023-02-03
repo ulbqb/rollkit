@@ -1,18 +1,21 @@
 package txindex_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	ds "github.com/ipfs/go-datastore"
+	ktds "github.com/ipfs/go-datastore/keytransform"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/types"
 
-	blockidxkv "github.com/celestiaorg/rollmint/state/indexer/block/kv"
-	"github.com/celestiaorg/rollmint/state/txindex"
-	"github.com/celestiaorg/rollmint/state/txindex/kv"
-	"github.com/celestiaorg/rollmint/store"
+	blockidxkv "github.com/rollkit/rollkit/state/indexer/block/kv"
+	"github.com/rollkit/rollkit/state/txindex"
+	"github.com/rollkit/rollkit/state/txindex/kv"
+	"github.com/rollkit/rollkit/store"
 )
 
 func TestIndexerServiceIndexesBlocks(t *testing.T) {
@@ -28,9 +31,10 @@ func TestIndexerServiceIndexesBlocks(t *testing.T) {
 	})
 
 	// tx indexer
-	kvStore := store.NewDefaultInMemoryKVStore()
-	txIndexer := kv.NewTxIndex(kvStore)
-	blockIndexer := blockidxkv.New(store.NewPrefixKV(kvStore, []byte("block_events")))
+	kvStore, _ := store.NewDefaultInMemoryKVStore()
+	txIndexer := kv.NewTxIndex(context.Background(), kvStore)
+	prefixStore := (ktds.Wrap(kvStore, ktds.PrefixTransform{Prefix: ds.NewKey("block_events")}).Children()[0]).(ds.TxnDatastore)
+	blockIndexer := blockidxkv.New(context.Background(), prefixStore)
 
 	service := txindex.NewIndexerService(txIndexer, blockIndexer, eventBus)
 	service.SetLogger(log.TestingLogger())

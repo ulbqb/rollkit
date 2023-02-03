@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/sync"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -15,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/multierr"
 
-	"github.com/celestiaorg/rollmint/config"
-	"github.com/celestiaorg/rollmint/log"
+	"github.com/rollkit/rollkit/config"
+	"github.com/rollkit/rollkit/log"
 )
 
 type testNet []*Client
@@ -101,11 +103,9 @@ func startTestNetwork(ctx context.Context, t *testing.T, n int, conf map[int]hos
 
 	clients := make([]*Client, n)
 	for i := 0; i < n; i++ {
-		client, err := NewClient(config.P2PConfig{
-			Seeds: seeds[i]},
+		client, err := NewClient(config.P2PConfig{Seeds: seeds[i]},
 			mnet.Hosts()[i].Peerstore().PrivKey(mnet.Hosts()[i].ID()),
-			conf[i].chainID,
-			logger)
+			conf[i].chainID, sync.MutexWrap(datastore.NewMapDatastore()), logger)
 		require.NoError(err)
 		require.NotNil(client)
 

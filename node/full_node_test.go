@@ -17,9 +17,9 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/types"
 
-	"github.com/celestiaorg/rollmint/config"
-	"github.com/celestiaorg/rollmint/mempool"
-	"github.com/celestiaorg/rollmint/mocks"
+	"github.com/rollkit/rollkit/config"
+	"github.com/rollkit/rollkit/mempool"
+	"github.com/rollkit/rollkit/mocks"
 )
 
 // simply check that node is starting and stopping without panicking
@@ -31,7 +31,7 @@ func TestStartup(t *testing.T) {
 	app.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	node, err := NewNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -57,7 +57,7 @@ func TestMempoolDirectly(t *testing.T) {
 	signingKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	anotherKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 
-	node, err := NewNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 

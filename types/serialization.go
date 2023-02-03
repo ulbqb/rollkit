@@ -1,12 +1,10 @@
 package types
 
 import (
-	"errors"
-
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/types"
 
-	pb "github.com/celestiaorg/rollmint/types/pb/rollmint"
+	pb "github.com/rollkit/rollkit/types/pb/rollkit"
 )
 
 // MarshalBinary encodes Block into binary form and returns it.
@@ -39,85 +37,6 @@ func (h *Header) UnmarshalBinary(data []byte) error {
 	}
 	err = h.FromProto(&pHeader)
 	return err
-}
-
-// MarshalBinary encodes Header into binary form and returns it.
-func (fp *FraudProof) MarshalBinary() ([]byte, error) {
-	return fp.ToProto().Marshal()
-}
-
-// UnmarshalBinary decodes binary form of Header into object.
-func (fp *FraudProof) UnmarshalBinary(data []byte) error {
-	var pFraudProof pb.FraudProof
-	err := pFraudProof.Unmarshal(data)
-	if err != nil {
-		return err
-	}
-	err = fp.FromProto(&pFraudProof)
-	return err
-}
-
-// ToProto converts Fraud Proof into protobuf representation and returns it.
-func (fp *FraudProof) ToProto() *pb.FraudProof {
-	return &pb.FraudProof{
-		BlockHeight:  fp.BlockHeight,
-		StateWitness: fp.StateWitness.ToProto(),
-	}
-}
-
-// FromProto fills Block with data from its protobuf representation.
-func (fp *FraudProof) FromProto(other *pb.FraudProof) error {
-	var err error
-	fp.BlockHeight = other.BlockHeight
-	err = fp.StateWitness.FromProto(other.StateWitness)
-	return err
-}
-
-// ToProto converts Witness Data into protobuf representation and returns it.
-func (wd *WitnessData) ToProto() *pb.WitnessData {
-	return &pb.WitnessData{
-		Key:   wd.Key[:],
-		Value: wd.Value[:],
-	}
-}
-
-// FromProto converts Witness Data from protobuf representation and returns it.
-func (wd *WitnessData) FromProto(other *pb.WitnessData) error {
-	wd.Key = other.Key
-	wd.Value = other.Value
-	return nil
-}
-
-func witnessesFromProto(sw *pb.StateWitness) ([]WitnessData, error) {
-	var witnesses []WitnessData
-	for _, wd := range sw.WitnessData {
-		var witnessData WitnessData
-		err := witnessData.FromProto(wd)
-		if err != nil {
-			return nil, err
-		}
-		witnesses = append(witnesses, witnessData)
-	}
-	return witnesses, nil
-}
-
-// ToProto converts State Witness into protobuf representation and returns it.
-func (sw *StateWitness) ToProto() *pb.StateWitness {
-	var witnessData []*pb.WitnessData
-	for _, wd := range sw.WitnessData {
-		witnessData = append(witnessData, wd.ToProto())
-	}
-	return &pb.StateWitness{WitnessData: witnessData}
-}
-
-// FromProto fills State Witness Data from its protobuf representation and returns it.
-func (stateWitness *StateWitness) FromProto(other *pb.StateWitness) error {
-	witnesses, err := witnessesFromProto(other)
-	if err != nil {
-		return err
-	}
-	stateWitness.WitnessData = witnesses[:]
-	return nil
 }
 
 // MarshalBinary encodes Data into binary form and returns it.
@@ -188,9 +107,8 @@ func (h *Header) ToProto() *pb.Header {
 			Block: h.Version.Block,
 			App:   h.Version.App,
 		},
-		NamespaceId:     h.NamespaceID[:],
-		Height:          h.Height,
-		Time:            h.Time,
+		Height:          h.BaseHeader.Height,
+		Time:            h.BaseHeader.Time,
 		LastHeaderHash:  h.LastHeaderHash[:],
 		LastCommitHash:  h.LastCommitHash[:],
 		DataHash:        h.DataHash[:],
@@ -199,6 +117,7 @@ func (h *Header) ToProto() *pb.Header {
 		LastResultsHash: h.LastResultsHash[:],
 		ProposerAddress: h.ProposerAddress[:],
 		AggregatorsHash: h.AggregatorsHash[:],
+		ChainId:         h.BaseHeader.ChainID,
 	}
 }
 
@@ -206,48 +125,22 @@ func (h *Header) ToProto() *pb.Header {
 func (h *Header) FromProto(other *pb.Header) error {
 	h.Version.Block = other.Version.Block
 	h.Version.App = other.Version.App
-	if !safeCopy(h.NamespaceID[:], other.NamespaceId) {
-		return errors.New("invalid length of 'NamespaceId'")
-	}
-	h.Height = other.Height
-	h.Time = other.Time
-	if !safeCopy(h.LastHeaderHash[:], other.LastHeaderHash) {
-		return errors.New("invalid length of 'LastHeaderHash'")
-	}
-	if !safeCopy(h.LastCommitHash[:], other.LastCommitHash) {
-		return errors.New("invalid length of 'LastCommitHash'")
-	}
-	if !safeCopy(h.DataHash[:], other.DataHash) {
-		return errors.New("invalid length of 'DataHash'")
-	}
-	if !safeCopy(h.ConsensusHash[:], other.ConsensusHash) {
-		return errors.New("invalid length of 'ConsensusHash'")
-	}
-	if !safeCopy(h.AppHash[:], other.AppHash) {
-		return errors.New("invalid length of 'AppHash'")
-	}
-	if !safeCopy(h.LastResultsHash[:], other.LastResultsHash) {
-		return errors.New("invalid length of 'LastResultsHash'")
-	}
-	if !safeCopy(h.AggregatorsHash[:], other.AggregatorsHash) {
-		return errors.New("invalid length of 'AggregatorsHash'")
-	}
+	h.BaseHeader.ChainID = other.ChainId
+	h.BaseHeader.Height = other.Height
+	h.BaseHeader.Time = other.Time
+	h.LastHeaderHash = other.LastHeaderHash
+	h.LastCommitHash = other.LastCommitHash
+	h.DataHash = other.DataHash
+	h.ConsensusHash = other.ConsensusHash
+	h.AppHash = other.AppHash
+	h.LastResultsHash = other.LastResultsHash
+	h.AggregatorsHash = other.AggregatorsHash
 	if len(other.ProposerAddress) > 0 {
 		h.ProposerAddress = make([]byte, len(other.ProposerAddress))
 		copy(h.ProposerAddress, other.ProposerAddress)
 	}
 
 	return nil
-}
-
-// safeCopy copies bytes from src slice into dst slice if both have same size.
-// It returns true if sizes of src and dst are the same.
-func safeCopy(dst, src []byte) bool {
-	if len(src) != len(dst) {
-		return false
-	}
-	_ = copy(dst, src)
-	return true
 }
 
 // ToProto converts Block into protobuf representation and returns it.
@@ -291,7 +184,7 @@ func (b *Block) FromProto(other *pb.Block) error {
 func (c *Commit) ToProto() *pb.Commit {
 	return &pb.Commit{
 		Height:     c.Height,
-		HeaderHash: c.HeaderHash[:],
+		HeaderHash: c.HeaderHash,
 		Signatures: signaturesToByteSlices(c.Signatures),
 	}
 }
@@ -299,9 +192,7 @@ func (c *Commit) ToProto() *pb.Commit {
 // FromProto fills Commit with data from its protobuf representation.
 func (c *Commit) FromProto(other *pb.Commit) error {
 	c.Height = other.Height
-	if !safeCopy(c.HeaderHash[:], other.HeaderHash) {
-		return errors.New("invalid length of HeaderHash")
-	}
+	c.HeaderHash = other.HeaderHash
 	c.Signatures = byteSlicesToSignatures(other.Signatures)
 
 	return nil
@@ -370,8 +261,8 @@ func (s *State) FromProto(other *pb.State) error {
 	s.LastHeightValidatorsChanged = other.LastHeightValidatorsChanged
 	s.ConsensusParams = other.ConsensusParams
 	s.LastHeightConsensusParamsChanged = other.LastHeightConsensusParamsChanged
-	copy(s.LastResultsHash[:], other.LastResultsHash)
-	copy(s.AppHash[:], other.AppHash)
+	s.LastResultsHash = other.LastResultsHash
+	s.AppHash = other.AppHash
 
 	return nil
 }

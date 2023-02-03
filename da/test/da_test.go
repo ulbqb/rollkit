@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"encoding/json"
 	"math/rand"
 	"net"
@@ -15,16 +16,16 @@ import (
 
 	tmlog "github.com/tendermint/tendermint/libs/log"
 
-	"github.com/celestiaorg/rollmint/da"
-	"github.com/celestiaorg/rollmint/da/celestia"
-	cmock "github.com/celestiaorg/rollmint/da/celestia/mock"
-	grpcda "github.com/celestiaorg/rollmint/da/grpc"
-	"github.com/celestiaorg/rollmint/da/grpc/mockserv"
-	"github.com/celestiaorg/rollmint/da/mock"
-	"github.com/celestiaorg/rollmint/da/registry"
-	"github.com/celestiaorg/rollmint/log/test"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
+	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/da/celestia"
+	cmock "github.com/rollkit/rollkit/da/celestia/mock"
+	grpcda "github.com/rollkit/rollkit/da/grpc"
+	"github.com/rollkit/rollkit/da/grpc/mockserv"
+	"github.com/rollkit/rollkit/da/mock"
+	"github.com/rollkit/rollkit/da/registry"
+	"github.com/rollkit/rollkit/log/test"
+	"github.com/rollkit/rollkit/store"
+	"github.com/rollkit/rollkit/types"
 )
 
 const mockDaBlockTime = 100 * time.Millisecond
@@ -72,6 +73,7 @@ func TestDALC(t *testing.T) {
 func doTestDALC(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 	require := require.New(t)
 	assert := assert.New(t)
+	ctx := context.Background()
 
 	// mock DALC will advance block height every 100ms
 	conf := []byte{}
@@ -86,7 +88,8 @@ func doTestDALC(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 		}
 		conf, _ = json.Marshal(config)
 	}
-	err := dalc.Init(testNamespaceID, conf, store.NewDefaultInMemoryKVStore(), test.NewLogger(t))
+	kvStore, _ := store.NewDefaultInMemoryKVStore()
+	err := dalc.Init(testNamespaceID, conf, kvStore, test.NewLogger(t))
 	require.NoError(err)
 
 	err = dalc.Start()
@@ -99,27 +102,27 @@ func doTestDALC(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 	b1 := getRandomBlock(1, 10)
 	b2 := getRandomBlock(2, 10)
 
-	resp := dalc.SubmitBlock(b1)
+	resp := dalc.SubmitBlock(ctx, b1)
 	h1 := resp.DAHeight
 	assert.Equal(da.StatusSuccess, resp.Code)
 
-	resp = dalc.SubmitBlock(b2)
+	resp = dalc.SubmitBlock(ctx, b2)
 	h2 := resp.DAHeight
 	assert.Equal(da.StatusSuccess, resp.Code)
 
-	// wait a bit more than mockDaBlockTime, so rollmint blocks can be "included" in mock block
+	// wait a bit more than mockDaBlockTime, so Rollkit blocks can be "included" in mock block
 	time.Sleep(mockDaBlockTime + 20*time.Millisecond)
 
-	check := dalc.CheckBlockAvailability(h1)
+	check := dalc.CheckBlockAvailability(ctx, h1)
 	assert.Equal(da.StatusSuccess, check.Code)
 	assert.True(check.DataAvailable)
 
-	check = dalc.CheckBlockAvailability(h2)
+	check = dalc.CheckBlockAvailability(ctx, h2)
 	assert.Equal(da.StatusSuccess, check.Code)
 	assert.True(check.DataAvailable)
 
 	// this height should not be used by DALC
-	check = dalc.CheckBlockAvailability(h1 - 1)
+	check = dalc.CheckBlockAvailability(ctx, h1-1)
 	assert.Equal(da.StatusSuccess, check.Code)
 	assert.False(check.DataAvailable)
 }
@@ -147,7 +150,8 @@ func startMockGRPCServ(t *testing.T) *grpc.Server {
 	conf := grpcda.DefaultConfig
 	logger := tmlog.NewTMLogger(os.Stdout)
 
-	srv := mockserv.GetServer(store.NewDefaultInMemoryKVStore(), conf, []byte(mockDaBlockTime.String()), logger)
+	kvStore, _ := store.NewDefaultInMemoryKVStore()
+	srv := mockserv.GetServer(kvStore, conf, []byte(mockDaBlockTime.String()), logger)
 	lis, err := net.Listen("tcp", conf.Host+":"+strconv.Itoa(conf.Port))
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +177,7 @@ func startMockCelestiaNodeServer(t *testing.T) *cmock.Server {
 }
 
 func doTestRetrieve(t *testing.T, dalc da.DataAvailabilityLayerClient) {
+	ctx := context.Background()
 	require := require.New(t)
 	assert := assert.New(t)
 
@@ -189,7 +194,8 @@ func doTestRetrieve(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 		}
 		conf, _ = json.Marshal(config)
 	}
-	err := dalc.Init(testNamespaceID, conf, store.NewDefaultInMemoryKVStore(), test.NewLogger(t))
+	kvStore, _ := store.NewDefaultInMemoryKVStore()
+	err := dalc.Init(testNamespaceID, conf, kvStore, test.NewLogger(t))
 	require.NoError(err)
 
 	err = dalc.Start()
@@ -204,7 +210,7 @@ func doTestRetrieve(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 
 	for i := uint64(0); i < 100; i++ {
 		b := getRandomBlock(i, rand.Int()%20)
-		resp := dalc.SubmitBlock(b)
+		resp := dalc.SubmitBlock(ctx, b)
 		assert.Equal(da.StatusSuccess, resp.Code, resp.Message)
 		time.Sleep(time.Duration(rand.Int63() % mockDaBlockTime.Milliseconds()))
 
@@ -217,14 +223,14 @@ func doTestRetrieve(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 
 	for h, cnt := range countAtHeight {
 		t.Log("Retrieving block, DA Height", h)
-		ret := retriever.RetrieveBlocks(h)
+		ret := retriever.RetrieveBlocks(ctx, h)
 		assert.Equal(da.StatusSuccess, ret.Code, ret.Message)
 		require.NotEmpty(ret.Blocks, h)
 		assert.Len(ret.Blocks, cnt, h)
 	}
 
 	for b, h := range blocks {
-		ret := retriever.RetrieveBlocks(h)
+		ret := retriever.RetrieveBlocks(ctx, h)
 		assert.Equal(da.StatusSuccess, ret.Code, h)
 		require.NotEmpty(ret.Blocks, h)
 		assert.Contains(ret.Blocks, b, h)
@@ -235,7 +241,10 @@ func doTestRetrieve(t *testing.T, dalc da.DataAvailabilityLayerClient) {
 func getRandomBlock(height uint64, nTxs int) *types.Block {
 	block := &types.Block{
 		Header: types.Header{
-			Height: height,
+			BaseHeader: types.BaseHeader{
+				Height: height,
+			},
+			AggregatorsHash: make([]byte, 32),
 		},
 		Data: types.Data{
 			Txs: make(types.Txs, nTxs),
@@ -244,14 +253,14 @@ func getRandomBlock(height uint64, nTxs int) *types.Block {
 			},
 		},
 	}
-	copy(block.Header.AppHash[:], getRandomBytes(32))
+	block.Header.AppHash = getRandomBytes(32)
 
 	for i := 0; i < nTxs; i++ {
 		block.Data.Txs[i] = getRandomTx()
 		block.Data.IntermediateStateRoots.RawRootsList[i] = getRandomBytes(32)
 	}
 
-	// TODO(tzdybal): see https://github.com/celestiaorg/rollmint/issues/143
+	// TODO(tzdybal): see https://github.com/rollkit/rollkit/issues/143
 	if nTxs == 0 {
 		block.Data.Txs = nil
 		block.Data.IntermediateStateRoots.RawRootsList = nil

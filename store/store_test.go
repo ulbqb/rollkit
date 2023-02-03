@@ -1,10 +1,12 @@
 package store
 
 import (
+	"context"
 	"math/rand"
 	"os"
 	"testing"
 
+	ds "github.com/ipfs/go-datastore"
 	abcitypes "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/crypto/ed25519"
 	tmstate "github.com/tendermint/tendermint/proto/tendermint/state"
@@ -13,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/celestiaorg/rollmint/types"
+	"github.com/rollkit/rollkit/types"
 )
 
 func TestStoreHeight(t *testing.T) {
@@ -43,12 +45,13 @@ func TestStoreHeight(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert := assert.New(t)
-			bstore := New(NewDefaultInMemoryKVStore())
+			ds, _ := NewDefaultInMemoryKVStore()
+			bstore := New(context.Background(), ds)
 			assert.Equal(uint64(0), bstore.Height())
 
 			for _, block := range c.blocks {
 				err := bstore.SaveBlock(block, &types.Commit{})
-				bstore.SetHeight(block.Header.Height)
+				bstore.SetHeight(uint64(block.Header.Height()))
 				assert.NoError(err)
 			}
 
@@ -78,7 +81,7 @@ func TestStoreLoad(t *testing.T) {
 		//}},
 	}
 
-	tmpDir, err := os.MkdirTemp("", "rollmint_test")
+	tmpDir, err := os.MkdirTemp("", "rollkit_test")
 	require.NoError(t, err)
 	defer func() {
 		err := os.RemoveAll(tmpDir)
@@ -87,17 +90,19 @@ func TestStoreLoad(t *testing.T) {
 		}
 	}()
 
-	for _, kv := range []KVStore{NewDefaultInMemoryKVStore(), NewDefaultKVStore(tmpDir, "db", "test")} {
+	mKV, _ := NewDefaultInMemoryKVStore()
+	dKV, _ := NewDefaultKVStore(tmpDir, "db", "test")
+	for _, kv := range []ds.TxnDatastore{mKV, dKV} {
 		for _, c := range cases {
 			t.Run(c.name, func(t *testing.T) {
 				assert := assert.New(t)
 				require := require.New(t)
 
-				bstore := New(kv)
+				bstore := New(context.Background(), kv)
 
 				lastCommit := &types.Commit{}
 				for _, block := range c.blocks {
-					commit := &types.Commit{Height: block.Header.Height, HeaderHash: block.Header.Hash()}
+					commit := &types.Commit{Height: uint64(block.Header.Height()), HeaderHash: block.Header.Hash()}
 					block.LastCommit = *lastCommit
 					err := bstore.SaveBlock(block, commit)
 					require.NoError(err)
@@ -105,18 +110,18 @@ func TestStoreLoad(t *testing.T) {
 				}
 
 				for _, expected := range c.blocks {
-					block, err := bstore.LoadBlock(expected.Header.Height)
+					block, err := bstore.LoadBlock(uint64(expected.Header.Height()))
 					assert.NoError(err)
 					assert.NotNil(block)
 					assert.Equal(expected, block)
-					assert.Equal(expected.Header.Height-1, block.LastCommit.Height)
+					assert.Equal(expected.Header.Height()-1, int64(block.LastCommit.Height))
 					assert.Equal(expected.LastCommit.Height, block.LastCommit.Height)
 					assert.Equal(expected.LastCommit.HeaderHash, block.LastCommit.HeaderHash)
 
-					commit, err := bstore.LoadCommit(expected.Header.Height)
+					commit, err := bstore.LoadCommit(uint64(expected.Header.Height()))
 					assert.NoError(err)
 					assert.NotNil(commit)
-					assert.Equal(expected.Header.Height, commit.Height)
+					assert.Equal(uint64(expected.Header.Height()), commit.Height)
 					headerHash := expected.Header.Hash()
 					assert.Equal(headerHash, commit.HeaderHash)
 				}
@@ -132,8 +137,9 @@ func TestRestart(t *testing.T) {
 
 	validatorSet := getRandomValidatorSet()
 
-	kv := NewDefaultInMemoryKVStore()
-	s1 := New(kv)
+	ctx := context.Background()
+	kv, _ := NewDefaultInMemoryKVStore()
+	s1 := New(ctx, kv)
 	expectedHeight := uint64(10)
 	err := s1.UpdateState(types.State{
 		LastBlockHeight: int64(expectedHeight),
@@ -143,7 +149,7 @@ func TestRestart(t *testing.T) {
 	})
 	assert.NoError(err)
 
-	s2 := New(kv)
+	s2 := New(ctx, kv)
 	_, err = s2.LoadState()
 	assert.NoError(err)
 
@@ -154,8 +160,8 @@ func TestBlockResponses(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
 
-	kv := NewDefaultInMemoryKVStore()
-	s := New(kv)
+	kv, _ := NewDefaultInMemoryKVStore()
+	s := New(context.Background(), kv)
 
 	expected := &tmstate.ABCIResponses{
 		BeginBlock: &abcitypes.ResponseBeginBlock{
@@ -196,7 +202,10 @@ func TestBlockResponses(t *testing.T) {
 func getRandomBlock(height uint64, nTxs int) *types.Block {
 	block := &types.Block{
 		Header: types.Header{
-			Height: height,
+			BaseHeader: types.BaseHeader{
+				Height: height,
+			},
+			AggregatorsHash: make([]byte, 32),
 		},
 		Data: types.Data{
 			Txs: make(types.Txs, nTxs),

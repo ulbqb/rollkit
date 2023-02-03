@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	ds "github.com/ipfs/go-datastore"
 
 	"github.com/celestiaorg/go-cnc"
-	"github.com/celestiaorg/rollmint/da"
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
-	pb "github.com/celestiaorg/rollmint/types/pb/rollmint"
+
+	"github.com/rollkit/rollkit/da"
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/types"
+	pb "github.com/rollkit/rollkit/types/pb/rollkit"
 )
 
 // DataAvailabilityLayerClient use celestia-node public API.
@@ -32,11 +33,12 @@ var _ da.BlockRetriever = &DataAvailabilityLayerClient{}
 type Config struct {
 	BaseURL  string        `json:"base_url"`
 	Timeout  time.Duration `json:"timeout"`
+	Fee      int64         `json:"fee"`
 	GasLimit uint64        `json:"gas_limit"`
 }
 
 // Init initializes DataAvailabilityLayerClient instance.
-func (c *DataAvailabilityLayerClient) Init(namespaceID types.NamespaceID, config []byte, kvStore store.KVStore, logger log.Logger) error {
+func (c *DataAvailabilityLayerClient) Init(namespaceID types.NamespaceID, config []byte, kvStore ds.Datastore, logger log.Logger) error {
 	c.namespaceID = namespaceID
 	c.logger = logger
 
@@ -62,7 +64,7 @@ func (c *DataAvailabilityLayerClient) Stop() error {
 }
 
 // SubmitBlock submits a block to DA layer.
-func (c *DataAvailabilityLayerClient) SubmitBlock(block *types.Block) da.ResultSubmitBlock {
+func (c *DataAvailabilityLayerClient) SubmitBlock(ctx context.Context, block *types.Block) da.ResultSubmitBlock {
 	blob, err := block.MarshalBinary()
 	if err != nil {
 		return da.ResultSubmitBlock{
@@ -73,7 +75,7 @@ func (c *DataAvailabilityLayerClient) SubmitBlock(block *types.Block) da.ResultS
 		}
 	}
 
-	txResponse, err := c.client.SubmitPFD(context.TODO(), c.namespaceID, blob, c.config.GasLimit)
+	txResponse, err := c.client.SubmitPFD(ctx, c.namespaceID, blob, c.config.Fee, c.config.GasLimit)
 
 	if err != nil {
 		return da.ResultSubmitBlock{
@@ -103,8 +105,8 @@ func (c *DataAvailabilityLayerClient) SubmitBlock(block *types.Block) da.ResultS
 }
 
 // CheckBlockAvailability queries DA layer to check data availability of block at given height.
-func (c *DataAvailabilityLayerClient) CheckBlockAvailability(dataLayerHeight uint64) da.ResultCheckBlock {
-	shares, err := c.client.NamespacedShares(context.TODO(), c.namespaceID, dataLayerHeight)
+func (c *DataAvailabilityLayerClient) CheckBlockAvailability(ctx context.Context, dataLayerHeight uint64) da.ResultCheckBlock {
+	shares, err := c.client.NamespacedShares(ctx, c.namespaceID, dataLayerHeight)
 	if err != nil {
 		return da.ResultCheckBlock{
 			BaseResult: da.BaseResult{
@@ -124,8 +126,8 @@ func (c *DataAvailabilityLayerClient) CheckBlockAvailability(dataLayerHeight uin
 }
 
 // RetrieveBlocks gets a batch of blocks from DA layer.
-func (c *DataAvailabilityLayerClient) RetrieveBlocks(dataLayerHeight uint64) da.ResultRetrieveBlocks {
-	data, err := c.client.NamespacedData(context.TODO(), c.namespaceID, dataLayerHeight)
+func (c *DataAvailabilityLayerClient) RetrieveBlocks(ctx context.Context, dataLayerHeight uint64) da.ResultRetrieveBlocks {
+	data, err := c.client.NamespacedData(ctx, c.namespaceID, dataLayerHeight)
 	if err != nil {
 		return da.ResultRetrieveBlocks{
 			BaseResult: da.BaseResult{

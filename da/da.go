@@ -1,14 +1,17 @@
 package da
 
 import (
-	"github.com/celestiaorg/rollmint/log"
-	"github.com/celestiaorg/rollmint/store"
-	"github.com/celestiaorg/rollmint/types"
+	"context"
+
+	ds "github.com/ipfs/go-datastore"
+
+	"github.com/rollkit/rollkit/log"
+	"github.com/rollkit/rollkit/types"
 )
 
 // StatusCode is a type for DA layer return status.
 // TODO: define an enum of different non-happy-path cases
-// that might need to be handled by rollmint independent of
+// that might need to be handled by Rollkit independent of
 // the underlying DA chain.
 type StatusCode uint64
 
@@ -34,7 +37,7 @@ type BaseResult struct {
 type ResultSubmitBlock struct {
 	BaseResult
 	// Not sure if this needs to be bubbled up to other
-	// parts of rollmint.
+	// parts of Rollkit.
 	// Hash hash.Hash
 }
 
@@ -58,7 +61,7 @@ type ResultRetrieveBlocks struct {
 // It also contains life-cycle methods.
 type DataAvailabilityLayerClient interface {
 	// Init is called once to allow DA client to read configuration and initialize resources.
-	Init(namespaceID types.NamespaceID, config []byte, kvStore store.KVStore, logger log.Logger) error
+	Init(namespaceID types.NamespaceID, config []byte, kvStore ds.Datastore, logger log.Logger) error
 
 	// Start is called once, after Init. It's implementation should start operation of DataAvailabilityLayerClient.
 	Start() error
@@ -69,15 +72,15 @@ type DataAvailabilityLayerClient interface {
 	// SubmitBlock submits the passed in block to the DA layer.
 	// This should create a transaction which (potentially)
 	// triggers a state transition in the DA layer.
-	SubmitBlock(block *types.Block) ResultSubmitBlock
+	SubmitBlock(ctx context.Context, block *types.Block) ResultSubmitBlock
 
 	// CheckBlockAvailability queries DA layer to check data availability of block corresponding at given height.
-	CheckBlockAvailability(dataLayerHeight uint64) ResultCheckBlock
+	CheckBlockAvailability(ctx context.Context, dataLayerHeight uint64) ResultCheckBlock
 }
 
 // BlockRetriever is additional interface that can be implemented by Data Availability Layer Client that is able to retrieve
 // block data from DA layer. This gives the ability to use it for block synchronization.
 type BlockRetriever interface {
 	// RetrieveBlocks returns blocks at given data layer height from data availability layer.
-	RetrieveBlocks(dataLayerHeight uint64) ResultRetrieveBlocks
+	RetrieveBlocks(ctx context.Context, dataLayerHeight uint64) ResultRetrieveBlocks
 }

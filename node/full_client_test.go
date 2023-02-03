@@ -1,11 +1,11 @@
-package client
+package node
 
 import (
 	"context"
 	crand "crypto/rand"
-	cryptorand "crypto/rand"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,11 +28,10 @@ import (
 	tmtypes "github.com/tendermint/tendermint/types"
 	"github.com/tendermint/tendermint/version"
 
-	"github.com/celestiaorg/rollmint/config"
-	abciconv "github.com/celestiaorg/rollmint/conv/abci"
-	"github.com/celestiaorg/rollmint/mocks"
-	"github.com/celestiaorg/rollmint/node"
-	"github.com/celestiaorg/rollmint/types"
+	"github.com/rollkit/rollkit/config"
+	abciconv "github.com/rollkit/rollkit/conv/abci"
+	"github.com/rollkit/rollkit/mocks"
+	"github.com/rollkit/rollkit/types"
 )
 
 var expectedInfo = abci.ResponseInfo{
@@ -89,11 +88,11 @@ func TestGenesisChunked(t *testing.T) {
 
 	mockApp := &mocks.Application{}
 	mockApp.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
-	privKey, _, _ := crypto.GenerateEd25519Key(cryptorand.Reader)
-	signingKey, _, _ := crypto.GenerateEd25519Key(cryptorand.Reader)
-	n, _ := node.NewNode(context.Background(), config.NodeConfig{DALayer: "mock"}, privKey, signingKey, abcicli.NewLocalClient(nil, mockApp), genDoc, log.TestingLogger())
+	privKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
+	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
+	n, _ := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, privKey, signingKey, abcicli.NewLocalClient(nil, mockApp), genDoc, log.TestingLogger())
 
-	rpc := NewClient(n)
+	rpc := NewFullClient(n)
 
 	var expectedID uint = 2
 	gc, err := rpc.GenesisChunked(context.Background(), expectedID)
@@ -248,7 +247,7 @@ func TestGetBlock(t *testing.T) {
 
 	block := getRandomBlock(1, 10)
 	err = rpc.node.Store.SaveBlock(block, &types.Commit{})
-	rpc.node.Store.SetHeight(block.Header.Height)
+	rpc.node.Store.SetHeight(uint64(block.Header.Height()))
 	require.NoError(err)
 
 	blockResp, err := rpc.Block(context.Background(), nil)
@@ -274,17 +273,17 @@ func TestGetCommit(t *testing.T) {
 	require.NoError(err)
 
 	for _, b := range blocks {
-		err = rpc.node.Store.SaveBlock(b, &types.Commit{Height: b.Header.Height})
-		rpc.node.Store.SetHeight(b.Header.Height)
+		err = rpc.node.Store.SaveBlock(b, &types.Commit{Height: uint64(b.Header.Height())})
+		rpc.node.Store.SetHeight(uint64(b.Header.Height()))
 		require.NoError(err)
 	}
 	t.Run("Fetch all commits", func(t *testing.T) {
 		for _, b := range blocks {
-			h := int64(b.Header.Height)
+			h := b.Header.Height()
 			commit, err := rpc.Commit(context.Background(), &h)
 			require.NoError(err)
 			require.NotNil(commit)
-			assert.Equal(b.Header.Height, uint64(commit.Height))
+			assert.Equal(b.Header.Height(), commit.Height)
 		}
 	})
 
@@ -292,7 +291,7 @@ func TestGetCommit(t *testing.T) {
 		commit, err := rpc.Commit(context.Background(), nil)
 		require.NoError(err)
 		require.NotNil(commit)
-		assert.Equal(blocks[3].Header.Height, uint64(commit.Height))
+		assert.Equal(blocks[3].Header.Height(), commit.Height)
 	})
 
 	err = rpc.node.Stop()
@@ -378,12 +377,12 @@ func TestGetBlockByHash(t *testing.T) {
 	abciBlock, err := abciconv.ToABCIBlock(block)
 	require.NoError(err)
 
-	height := int64(block.Header.Height)
+	height := block.Header.Height()
 	retrievedBlock, err := rpc.Block(context.Background(), &height)
 	require.NoError(err)
 	require.NotNil(retrievedBlock)
 	assert.Equal(abciBlock, retrievedBlock.Block)
-	assert.Equal(abciBlock.Hash(), retrievedBlock.Block.Header.Hash())
+	assert.Equal(abciBlock.Hash(), retrievedBlock.Block.Hash())
 
 	blockHash := block.Header.Hash()
 	blockResp, err := rpc.BlockByHash(context.Background(), blockHash[:])
@@ -404,7 +403,7 @@ func TestTx(t *testing.T) {
 	mockApp.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	node, err := node.NewNode(context.Background(), config.NodeConfig{
+	node, err := newFullNode(context.Background(), config.NodeConfig{
 		DALayer:    "mock",
 		Aggregator: true,
 		BlockManagerConfig: config.BlockManagerConfig{
@@ -416,7 +415,7 @@ func TestTx(t *testing.T) {
 	require.NoError(err)
 	require.NotNil(node)
 
-	rpc := NewClient(node)
+	rpc := NewFullClient(node)
 	require.NotNil(rpc)
 	mockApp.On("BeginBlock", mock.Anything).Return(abci.ResponseBeginBlock{})
 	mockApp.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
@@ -567,7 +566,7 @@ func TestBlockchainInfo(t *testing.T) {
 			Height:     uint64(h),
 			HeaderHash: block.Header.Hash(),
 		})
-		rpc.node.Store.SetHeight(block.Header.Height)
+		rpc.node.Store.SetHeight(uint64(block.Header.Height()))
 		require.NoError(err)
 	}
 
@@ -661,11 +660,11 @@ func TestValidatorSetHandling(t *testing.T) {
 		waitCh <- nil
 	})
 
-	node, err := node.NewNode(context.Background(), config.NodeConfig{DALayer: "mock", Aggregator: true, BlockManagerConfig: config.BlockManagerConfig{BlockTime: 10 * time.Millisecond}}, key, signingKey, abcicli.NewLocalClient(nil, app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock", Aggregator: true, BlockManagerConfig: config.BlockManagerConfig{BlockTime: 10 * time.Millisecond}}, key, signingKey, abcicli.NewLocalClient(nil, app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
-	rpc := NewClient(node)
+	rpc := NewFullClient(node)
 	require.NotNil(rpc)
 
 	err = node.Start()
@@ -721,9 +720,12 @@ func getRandomBlock(height uint64, nTxs int) *types.Block {
 func getRandomBlockWithProposer(height uint64, nTxs int, proposerAddr []byte) *types.Block {
 	block := &types.Block{
 		Header: types.Header{
-			Height:          height,
+			BaseHeader: types.BaseHeader{
+				Height: height,
+			},
 			Version:         types.Version{Block: types.InitStateVersion.Consensus.Block},
 			ProposerAddress: proposerAddr,
+			AggregatorsHash: make([]byte, 32),
 		},
 		Data: types.Data{
 			Txs: make(types.Txs, nTxs),
@@ -732,14 +734,14 @@ func getRandomBlockWithProposer(height uint64, nTxs int, proposerAddr []byte) *t
 			},
 		},
 	}
-	copy(block.Header.AppHash[:], getRandomBytes(32))
+	block.Header.AppHash = getRandomBytes(32)
 
 	for i := 0; i < nTxs; i++ {
 		block.Data.Txs[i] = getRandomTx()
 		block.Data.IntermediateStateRoots.RawRootsList[i] = getRandomBytes(32)
 	}
 
-	// TODO(tzdybal): see https://github.com/celestiaorg/rollmint/issues/143
+	// TODO(tzdybal): see https://github.com/rollkit/rollkit/issues/143
 	if nTxs == 0 {
 		block.Data.Txs = nil
 		block.Data.IntermediateStateRoots.RawRootsList = nil
@@ -749,7 +751,9 @@ func getRandomBlockWithProposer(height uint64, nTxs int, proposerAddr []byte) *t
 	if err != nil {
 		return nil
 	}
-	copy(block.Header.LastCommitHash[:], tmprotoLC.Hash())
+	lastCommitHash := make(types.Hash, 32)
+	copy(lastCommitHash, tmprotoLC.Hash().Bytes())
+	block.Header.LastCommitHash = lastCommitHash
 
 	return block
 }
@@ -765,7 +769,7 @@ func getRandomBytes(n int) []byte {
 	return data
 }
 
-func getBlockMeta(rpc *Client, n int64) *tmtypes.BlockMeta {
+func getBlockMeta(rpc *FullClient, n int64) *tmtypes.BlockMeta {
 	b, err := rpc.node.Store.LoadBlock(uint64(n))
 	if err != nil {
 		return nil
@@ -778,25 +782,25 @@ func getBlockMeta(rpc *Client, n int64) *tmtypes.BlockMeta {
 	return bmeta
 }
 
-func getRPC(t *testing.T) (*mocks.Application, *Client) {
+func getRPC(t *testing.T) (*mocks.Application, *FullClient) {
 	t.Helper()
 	require := require.New(t)
 	app := &mocks.Application{}
 	app.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	node, err := node.NewNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, abcicli.NewLocalClient(nil, app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
-	rpc := NewClient(node)
+	rpc := NewFullClient(node)
 	require.NotNil(rpc)
 
 	return app, rpc
 }
 
 // From state/indexer/block/kv/kv_test
-func indexBlocks(t *testing.T, rpc *Client, heights []int64) {
+func indexBlocks(t *testing.T, rpc *FullClient, heights []int64) {
 	t.Helper()
 
 	for _, h := range heights {
@@ -850,7 +854,7 @@ func TestMempool2Nodes(t *testing.T) {
 	id1, err := peer.IDFromPrivateKey(key1)
 	require.NoError(err)
 
-	node1, err := node.NewNode(context.Background(), config.NodeConfig{
+	node1, err := newFullNode(context.Background(), config.NodeConfig{
 		DALayer: "mock",
 		P2P: config.P2PConfig{
 			ListenAddress: "/ip4/127.0.0.1/tcp/9001",
@@ -859,7 +863,7 @@ func TestMempool2Nodes(t *testing.T) {
 	require.NoError(err)
 	require.NotNil(node1)
 
-	node2, err := node.NewNode(context.Background(), config.NodeConfig{
+	node2, err := newFullNode(context.Background(), config.NodeConfig{
 		DALayer: "mock",
 		P2P: config.P2PConfig{
 			ListenAddress: "/ip4/127.0.0.1/tcp/9002",
@@ -880,7 +884,7 @@ func TestMempool2Nodes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	local := NewClient(node1)
+	local := NewFullClient(node1)
 	require.NotNil(local)
 
 	// broadcast the bad Tx, this should not be propogated or added to the local mempool
@@ -934,7 +938,7 @@ func TestStatus(t *testing.T) {
 		}
 	}
 
-	node, err := node.NewNode(
+	node, err := newFullNode(
 		context.Background(),
 		config.NodeConfig{
 			DALayer: "mock",
@@ -966,17 +970,17 @@ func TestStatus(t *testing.T) {
 	err = node.Store.UpdateState(types.State{LastValidators: validatorSet, NextValidators: validatorSet, Validators: validatorSet})
 	assert.NoError(err)
 
-	rpc := NewClient(node)
+	rpc := NewFullClient(node)
 	assert.NotNil(rpc)
 
 	earliestBlock := getRandomBlockWithProposer(1, 1, validators[0].Address.Bytes())
-	err = rpc.node.Store.SaveBlock(earliestBlock, &types.Commit{Height: earliestBlock.Header.Height})
-	rpc.node.Store.SetHeight(earliestBlock.Header.Height)
+	err = rpc.node.Store.SaveBlock(earliestBlock, &types.Commit{Height: uint64(earliestBlock.Header.Height())})
+	rpc.node.Store.SetHeight(uint64(earliestBlock.Header.Height()))
 	require.NoError(err)
 
 	latestBlock := getRandomBlockWithProposer(2, 1, validators[1].Address.Bytes())
-	err = rpc.node.Store.SaveBlock(latestBlock, &types.Commit{Height: latestBlock.Header.Height})
-	rpc.node.Store.SetHeight(latestBlock.Header.Height)
+	err = rpc.node.Store.SaveBlock(latestBlock, &types.Commit{Height: uint64(latestBlock.Header.Height())})
+	rpc.node.Store.SetHeight(uint64(latestBlock.Header.Height()))
 	require.NoError(err)
 
 	err = node.Start()
@@ -1018,4 +1022,50 @@ func TestStatus(t *testing.T) {
 		res := resp.NodeInfo.Other.TxIndex == tc.other.TxIndex
 		assert.Equal(tc.expected, res, tc)
 	}
+}
+
+func TestFutureGenesisTime(t *testing.T) {
+	t.Parallel()
+	assert := assert.New(t)
+	require := require.New(t)
+
+	var beginBlockTime time.Time
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	mockApp := &mocks.Application{}
+	mockApp.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
+	mockApp.On("BeginBlock", mock.Anything).Return(abci.ResponseBeginBlock{}).Run(func(_ mock.Arguments) {
+		beginBlockTime = time.Now()
+		wg.Done()
+	})
+	mockApp.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
+	mockApp.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
+	mockApp.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
+	mockApp.On("CheckTx", mock.Anything).Return(abci.ResponseCheckTx{})
+	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
+	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
+	genesisTime := time.Now().Local().Add(time.Second * time.Duration(1))
+	node, err := newFullNode(context.Background(), config.NodeConfig{
+		DALayer:    "mock",
+		Aggregator: true,
+		BlockManagerConfig: config.BlockManagerConfig{
+			BlockTime: 200 * time.Millisecond,
+		}},
+		key, signingKey,
+		abcicli.NewLocalClient(nil, mockApp),
+		&tmtypes.GenesisDoc{
+			ChainID:       "test",
+			InitialHeight: 1,
+			GenesisTime:   genesisTime,
+		},
+		log.TestingLogger())
+	require.NoError(err)
+	require.NotNil(node)
+
+	err = node.Start()
+	require.NoError(err)
+
+	wg.Wait()
+
+	assert.True(beginBlockTime.After(genesisTime))
 }

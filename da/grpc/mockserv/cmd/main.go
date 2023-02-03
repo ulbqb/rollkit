@@ -9,9 +9,9 @@ import (
 
 	tmlog "github.com/tendermint/tendermint/libs/log"
 
-	grpcda "github.com/celestiaorg/rollmint/da/grpc"
-	"github.com/celestiaorg/rollmint/da/grpc/mockserv"
-	"github.com/celestiaorg/rollmint/store"
+	grpcda "github.com/rollkit/rollkit/da/grpc"
+	"github.com/rollkit/rollkit/da/grpc/mockserv"
+	"github.com/rollkit/rollkit/store"
 )
 
 func main() {
@@ -22,7 +22,10 @@ func main() {
 	flag.StringVar(&conf.Host, "host", "0.0.0.0", "listening address")
 	flag.Parse()
 
-	kv := store.NewDefaultKVStore(".", "db", "rollmint")
+	kv, err := store.NewDefaultKVStore(".", "db", "rollkit")
+	if err != nil {
+		log.Panic(err)
+	}
 	lis, err := net.Listen("tcp", conf.Host+":"+strconv.Itoa(conf.Port))
 	if err != nil {
 		log.Panic(err)
