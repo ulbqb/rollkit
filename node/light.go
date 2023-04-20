@@ -6,16 +6,16 @@ import (
 
 	ds "github.com/ipfs/go-datastore"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/libs/service"
-	proxy "github.com/tendermint/tendermint/proxy"
 	rpcclient "github.com/tendermint/tendermint/rpc/client"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"go.uber.org/multierr"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/p2p"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/store"
 )
 
@@ -26,7 +26,7 @@ type LightNode struct {
 
 	P2P *p2p.Client
 
-	proxyApp proxy.AppConns
+	proxyApp rollproxy.AppConns
 
 	hExService *HeaderExchangeService
 
@@ -42,12 +42,12 @@ func newLightNode(
 	ctx context.Context,
 	conf config.NodeConfig,
 	p2pKey crypto.PrivKey,
-	clientCreator proxy.ClientCreator,
+	clientCreator rollproxy.ClientCreator,
 	genesis *tmtypes.GenesisDoc,
 	logger log.Logger,
 ) (*LightNode, error) {
 	// Create the proxyApp and establish connections to the ABCI app (consensus, mempool, query).
-	proxyApp := proxy.NewAppConns(clientCreator)
+	proxyApp := rollproxy.NewAppConns(clientCreator)
 	proxyApp.SetLogger(logger.With("module", "proxy"))
 	if err := proxyApp.Start(); err != nil {
 		return nil, fmt.Errorf("error starting proxy app connections: %v", err)
@@ -124,14 +124,14 @@ func (ln *LightNode) falseValidator() p2p.GossipValidator {
 func (ln *LightNode) newFraudProofValidator() p2p.GossipValidator {
 	return func(fraudProofMsg *p2p.GossipMessage) bool {
 		ln.Logger.Info("fraud proof received", "from", fraudProofMsg.From, "bytes", len(fraudProofMsg.Data))
-		fraudProof := abci.FraudProof{}
+		fraudProof := rollabci.FraudProof{}
 		err := fraudProof.Unmarshal(fraudProofMsg.Data)
 		if err != nil {
 			ln.Logger.Error("failed to deserialize fraud proof", "error", err)
 			return false
 		}
 
-		resp, err := ln.proxyApp.Consensus().VerifyFraudProofSync(abci.RequestVerifyFraudProof{
+		resp, err := ln.proxyApp.Consensus().VerifyFraudProofSync(rollabci.RequestVerifyFraudProof{
 			FraudProof:           &fraudProof,
 			ExpectedValidAppHash: fraudProof.ExpectedValidAppHash,
 		})

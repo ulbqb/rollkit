@@ -13,14 +13,15 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	tmcrypto "github.com/tendermint/tendermint/crypto"
 	"github.com/tendermint/tendermint/crypto/merkle"
-	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"go.uber.org/multierr"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
 	"github.com/rollkit/rollkit/log"
 	"github.com/rollkit/rollkit/mempool"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/state"
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/types"
@@ -60,7 +61,7 @@ type Manager struct {
 
 	HeaderCh chan *types.SignedHeader
 
-	FraudProofInCh chan *abci.FraudProof
+	FraudProofInCh chan *rollabci.FraudProof
 
 	blockInCh chan newBlockEvent
 	syncCache map[uint64]*types.Block
@@ -96,7 +97,7 @@ func NewManager(
 	genesis *tmtypes.GenesisDoc,
 	store store.Store,
 	mempool mempool.Mempool,
-	proxyApp proxy.AppConnConsensus,
+	proxyApp rollproxy.AppConnConsensus,
 	dalc da.DataAvailabilityLayerClient,
 	eventBus *tmtypes.EventBus,
 	logger log.Logger,
@@ -153,7 +154,7 @@ func NewManager(
 		// channels are buffered to avoid blocking on input/output operations, buffer sizes are arbitrary
 		HeaderCh:          make(chan *types.SignedHeader, 100),
 		blockInCh:         make(chan newBlockEvent, 100),
-		FraudProofInCh:    make(chan *abci.FraudProof, 100),
+		FraudProofInCh:    make(chan *rollabci.FraudProof, 100),
 		retrieveMtx:       new(sync.Mutex),
 		lastStateMtx:      new(sync.Mutex),
 		syncCache:         make(map[uint64]*types.Block),
@@ -181,7 +182,7 @@ func (m *Manager) SetDALC(dalc da.DataAvailabilityLayerClient) {
 	m.retriever = dalc.(da.BlockRetriever)
 }
 
-func (m *Manager) GetFraudProofOutChan() chan *abci.FraudProof {
+func (m *Manager) GetFraudProofOutChan() chan *rollabci.FraudProof {
 	return m.executor.FraudProofOutCh
 }
 

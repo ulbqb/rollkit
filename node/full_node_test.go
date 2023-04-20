@@ -14,12 +14,13 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
-	"github.com/tendermint/tendermint/proxy"
 	"github.com/tendermint/tendermint/types"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/mempool"
 	"github.com/rollkit/rollkit/mocks"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 )
 
 // simply check that node is starting and stopping without panicking
@@ -31,7 +32,7 @@ func TestStartup(t *testing.T) {
 	app.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
-	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, proxy.NewLocalClientCreator(app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, rollproxy.NewLocalClientCreator(app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -57,7 +58,7 @@ func TestMempoolDirectly(t *testing.T) {
 	signingKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	anotherKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 
-	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, proxy.NewLocalClientCreator(app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, rollproxy.NewLocalClientCreator(app), &types.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -66,20 +67,20 @@ func TestMempoolDirectly(t *testing.T) {
 
 	pid, err := peer.IDFromPrivateKey(anotherKey)
 	require.NoError(err)
-	err = node.Mempool.CheckTx([]byte("tx1"), func(r *abci.Response) {}, mempool.TxInfo{
+	err = node.Mempool.CheckTx([]byte("tx1"), func(r *rollabci.Response) {}, mempool.TxInfo{
 		SenderID: node.mempoolIDs.GetForPeer(pid),
 	})
 	require.NoError(err)
-	err = node.Mempool.CheckTx([]byte("tx2"), func(r *abci.Response) {}, mempool.TxInfo{
+	err = node.Mempool.CheckTx([]byte("tx2"), func(r *rollabci.Response) {}, mempool.TxInfo{
 		SenderID: node.mempoolIDs.GetForPeer(pid),
 	})
 	require.NoError(err)
 	time.Sleep(100 * time.Millisecond)
-	err = node.Mempool.CheckTx([]byte("tx3"), func(r *abci.Response) {}, mempool.TxInfo{
+	err = node.Mempool.CheckTx([]byte("tx3"), func(r *rollabci.Response) {}, mempool.TxInfo{
 		SenderID: node.mempoolIDs.GetForPeer(pid),
 	})
 	require.NoError(err)
-	err = node.Mempool.CheckTx([]byte("tx4"), func(r *abci.Response) {}, mempool.TxInfo{
+	err = node.Mempool.CheckTx([]byte("tx4"), func(r *rollabci.Response) {}, mempool.TxInfo{
 		SenderID: node.mempoolIDs.GetForPeer(pid),
 	})
 	require.NoError(err)

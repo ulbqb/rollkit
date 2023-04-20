@@ -17,9 +17,9 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/libs/service"
 	corep2p "github.com/tendermint/tendermint/p2p"
-	proxy "github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/block"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
@@ -27,6 +27,7 @@ import (
 	"github.com/rollkit/rollkit/mempool"
 	mempoolv1 "github.com/rollkit/rollkit/mempool/v1"
 	"github.com/rollkit/rollkit/p2p"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/state/indexer"
 	blockidxkv "github.com/rollkit/rollkit/state/indexer/block/kv"
 	"github.com/rollkit/rollkit/state/txindex"
@@ -54,7 +55,7 @@ var _ Node = &FullNode{}
 type FullNode struct {
 	service.BaseService
 	eventBus *tmtypes.EventBus
-	proxyApp proxy.AppConns
+	proxyApp rollproxy.AppConns
 
 	genesis *tmtypes.GenesisDoc
 	// cache of chunked genesis data.
@@ -94,11 +95,11 @@ func newFullNode(
 	conf config.NodeConfig,
 	p2pKey crypto.PrivKey,
 	signingKey crypto.PrivKey,
-	clientCreator proxy.ClientCreator,
+	clientCreator rollproxy.ClientCreator,
 	genesis *tmtypes.GenesisDoc,
 	logger log.Logger,
 ) (*FullNode, error) {
-	proxyApp := proxy.NewAppConns(clientCreator)
+	proxyApp := rollproxy.NewAppConns(clientCreator)
 	proxyApp.SetLogger(logger.With("module", "proxy"))
 	if err := proxyApp.Start(); err != nil {
 		return nil, fmt.Errorf("error starting proxy app connections: %v", err)
@@ -326,7 +327,7 @@ func (n *FullNode) EventBus() *tmtypes.EventBus {
 }
 
 // AppClient returns ABCI proxy connections to communicate with application.
-func (n *FullNode) AppClient() proxy.AppConns {
+func (n *FullNode) AppClient() rollproxy.AppConns {
 	return n.proxyApp
 }
 
@@ -335,8 +336,8 @@ func (n *FullNode) AppClient() proxy.AppConns {
 func (n *FullNode) newTxValidator() p2p.GossipValidator {
 	return func(m *p2p.GossipMessage) bool {
 		n.Logger.Debug("transaction received", "bytes", len(m.Data))
-		checkTxResCh := make(chan *abci.Response, 1)
-		err := n.Mempool.CheckTx(m.Data, func(resp *abci.Response) {
+		checkTxResCh := make(chan *rollabci.Response, 1)
+		err := n.Mempool.CheckTx(m.Data, func(resp *rollabci.Response) {
 			checkTxResCh <- resp
 		}, mempool.TxInfo{
 			SenderID:    n.mempoolIDs.GetForPeer(m.From),
@@ -365,7 +366,7 @@ func (n *FullNode) newTxValidator() p2p.GossipValidator {
 func (n *FullNode) newFraudProofValidator() p2p.GossipValidator {
 	return func(fraudProofMsg *p2p.GossipMessage) bool {
 		n.Logger.Debug("fraud proof received", "from", fraudProofMsg.From, "bytes", len(fraudProofMsg.Data))
-		fraudProof := abci.FraudProof{}
+		fraudProof := rollabci.FraudProof{}
 		err := fraudProof.Unmarshal(fraudProofMsg.Data)
 		if err != nil {
 			n.Logger.Error("failed to deserialize fraud proof", "error", err)

@@ -21,9 +21,11 @@ import (
 	tmtypes "github.com/tendermint/tendermint/types"
 	"github.com/tendermint/tendermint/version"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	rconfig "github.com/rollkit/rollkit/config"
 	abciconv "github.com/rollkit/rollkit/conv/abci"
 	"github.com/rollkit/rollkit/mempool"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 )
 
 const (
@@ -124,8 +126,8 @@ func (c *FullClient) BroadcastTxCommit(ctx context.Context, tx tmtypes.Tx) (*cty
 	}()
 
 	// add to mempool and wait for CheckTx result
-	checkTxResCh := make(chan *abci.Response, 1)
-	err = c.node.Mempool.CheckTx(tx, func(res *abci.Response) {
+	checkTxResCh := make(chan *rollabci.Response, 1)
+	err = c.node.Mempool.CheckTx(tx, func(res *rollabci.Response) {
 		checkTxResCh <- res
 	}, mempool.TxInfo{})
 	if err != nil {
@@ -203,8 +205,8 @@ func (c *FullClient) BroadcastTxAsync(ctx context.Context, tx tmtypes.Tx) (*ctyp
 // DeliverTx result.
 // More: https://docs.tendermint.com/master/rpc/#/Tx/broadcast_tx_sync
 func (c *FullClient) BroadcastTxSync(ctx context.Context, tx tmtypes.Tx) (*ctypes.ResultBroadcastTx, error) {
-	resCh := make(chan *abci.Response, 1)
-	err := c.node.Mempool.CheckTx(tx, func(res *abci.Response) {
+	resCh := make(chan *rollabci.Response, 1)
+	err := c.node.Mempool.CheckTx(tx, func(res *rollabci.Response) {
 		resCh <- res
 	}, mempool.TxInfo{})
 	if err != nil {
@@ -843,7 +845,7 @@ func (c *FullClient) resubscribe(subscriber string, q tmpubsub.Query) tmtypes.Su
 	}
 }
 
-func (c *FullClient) appClient() proxy.AppConns {
+func (c *FullClient) appClient() rollproxy.AppConns {
 	return c.node.AppClient()
 }
 

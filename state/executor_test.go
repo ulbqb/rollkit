@@ -15,12 +15,13 @@ import (
 	"github.com/tendermint/tendermint/crypto/ed25519"
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/libs/pubsub/query"
-	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/mempool"
 	mempoolv1 "github.com/rollkit/rollkit/mempool/v1"
 	"github.com/rollkit/rollkit/mocks"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/types"
 )
 
@@ -33,14 +34,14 @@ func doTestCreateBlock(t *testing.T, fraudProofsEnabled bool) {
 	app := &mocks.Application{}
 	app.On("CheckTx", mock.Anything).Return(abci.ResponseCheckTx{})
 
-	client, err := proxy.NewLocalClientCreator(app).NewABCIClient()
+	client, err := rollproxy.NewLocalClientCreator(app).NewABCIClient()
 	require.NoError(err)
 	require.NotNil(client)
 
 	nsID := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
 
-	mpool := mempoolv1.NewTxMempool(logger, cfg.DefaultMempoolConfig(), proxy.NewAppConnMempool(client), 0)
-	executor := NewBlockExecutor([]byte("test address"), nsID, "test", mpool, proxy.NewAppConnConsensus(client), fraudProofsEnabled, nil, logger)
+	mpool := mempoolv1.NewTxMempool(logger, cfg.DefaultMempoolConfig(), rollproxy.NewAppConnMempool(client), 0)
+	executor := NewBlockExecutor([]byte("test address"), nsID, "test", mpool, rollproxy.NewAppConnConsensus(client), fraudProofsEnabled, nil, logger)
 
 	state := types.State{}
 	state.ConsensusParams.Block.MaxBytes = 100
@@ -63,7 +64,7 @@ func doTestCreateBlock(t *testing.T, fraudProofsEnabled bool) {
 	assert.Equal(int64(1), block.SignedHeader.Header.Height())
 
 	// one small Tx
-	err = mpool.CheckTx([]byte{1, 2, 3, 4}, func(r *abci.Response) {}, mempool.TxInfo{})
+	err = mpool.CheckTx([]byte{1, 2, 3, 4}, func(r *rollabci.Response) {}, mempool.TxInfo{})
 	require.NoError(err)
 	block = executor.CreateBlock(2, &types.Commit{}, []byte{}, state)
 	require.NotNil(block)
@@ -71,9 +72,9 @@ func doTestCreateBlock(t *testing.T, fraudProofsEnabled bool) {
 	assert.Len(block.Data.Txs, 1)
 
 	// now there are 3 Txs, and only two can fit into single block
-	err = mpool.CheckTx([]byte{4, 5, 6, 7}, func(r *abci.Response) {}, mempool.TxInfo{})
+	err = mpool.CheckTx([]byte{4, 5, 6, 7}, func(r *rollabci.Response) {}, mempool.TxInfo{})
 	require.NoError(err)
-	err = mpool.CheckTx(make([]byte, 100), func(r *abci.Response) {}, mempool.TxInfo{})
+	err = mpool.CheckTx(make([]byte, 100), func(r *rollabci.Response) {}, mempool.TxInfo{})
 	require.NoError(err)
 	block = executor.CreateBlock(3, &types.Commit{}, []byte{}, state)
 	require.NotNil(block)
@@ -99,28 +100,28 @@ func doTestApplyBlock(t *testing.T, fraudProofsEnabled bool) {
 	app.On("BeginBlock", mock.Anything).Return(abci.ResponseBeginBlock{})
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
 	app.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
-	app.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{})
+	app.On("GenerateFraudProof", mock.Anything).Return(rollabci.ResponseGenerateFraudProof{})
 	var mockAppHash []byte
 	_, err := rand.Read(mockAppHash[:])
 	require.NoError(err)
-	app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{
+	app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{
 		AppHash: mockAppHash[:],
 	})
 	app.On("Commit", mock.Anything).Return(abci.ResponseCommit{
 		Data: mockAppHash[:],
 	})
 
-	client, err := proxy.NewLocalClientCreator(app).NewABCIClient()
+	client, err := rollproxy.NewLocalClientCreator(app).NewABCIClient()
 	require.NoError(err)
 	require.NotNil(client)
 
 	nsID := [8]byte{1, 2, 3, 4, 5, 6, 7, 8}
 	chainID := "test"
 
-	mpool := mempoolv1.NewTxMempool(logger, cfg.DefaultMempoolConfig(), proxy.NewAppConnMempool(client), 0)
+	mpool := mempoolv1.NewTxMempool(logger, cfg.DefaultMempoolConfig(), rollproxy.NewAppConnMempool(client), 0)
 	eventBus := tmtypes.NewEventBus()
 	require.NoError(eventBus.Start())
-	executor := NewBlockExecutor([]byte("test address"), nsID, chainID, mpool, proxy.NewAppConnConsensus(client), fraudProofsEnabled, eventBus, logger)
+	executor := NewBlockExecutor([]byte("test address"), nsID, chainID, mpool, rollproxy.NewAppConnConsensus(client), fraudProofsEnabled, eventBus, logger)
 
 	txQuery, err := query.New("tm.event='Tx'")
 	require.NoError(err)
@@ -153,7 +154,7 @@ func doTestApplyBlock(t *testing.T, fraudProofsEnabled bool) {
 	state.ConsensusParams.Block.MaxBytes = 100
 	state.ConsensusParams.Block.MaxGas = 100000
 
-	_ = mpool.CheckTx([]byte{1, 2, 3, 4}, func(r *abci.Response) {}, mempool.TxInfo{})
+	_ = mpool.CheckTx([]byte{1, 2, 3, 4}, func(r *rollabci.Response) {}, mempool.TxInfo{})
 	require.NoError(err)
 	block := executor.CreateBlock(1, &types.Commit{Signatures: []types.Signature{types.Signature([]byte{1, 1, 1})}}, []byte{}, state)
 	require.NotNil(block)
@@ -177,10 +178,10 @@ func doTestApplyBlock(t *testing.T, fraudProofsEnabled bool) {
 	require.NoError(err)
 	assert.Equal(mockAppHash, appHash)
 
-	require.NoError(mpool.CheckTx([]byte{0, 1, 2, 3, 4}, func(r *abci.Response) {}, mempool.TxInfo{}))
-	require.NoError(mpool.CheckTx([]byte{5, 6, 7, 8, 9}, func(r *abci.Response) {}, mempool.TxInfo{}))
-	require.NoError(mpool.CheckTx([]byte{1, 2, 3, 4, 5}, func(r *abci.Response) {}, mempool.TxInfo{}))
-	require.NoError(mpool.CheckTx(make([]byte, 90), func(r *abci.Response) {}, mempool.TxInfo{}))
+	require.NoError(mpool.CheckTx([]byte{0, 1, 2, 3, 4}, func(r *rollabci.Response) {}, mempool.TxInfo{}))
+	require.NoError(mpool.CheckTx([]byte{5, 6, 7, 8, 9}, func(r *rollabci.Response) {}, mempool.TxInfo{}))
+	require.NoError(mpool.CheckTx([]byte{1, 2, 3, 4, 5}, func(r *rollabci.Response) {}, mempool.TxInfo{}))
+	require.NoError(mpool.CheckTx(make([]byte, 90), func(r *rollabci.Response) {}, mempool.TxInfo{}))
 	block = executor.CreateBlock(2, &types.Commit{Signatures: []types.Signature{types.Signature([]byte{1, 1, 1})}}, []byte{}, newState)
 	require.NotNil(block)
 	assert.Equal(int64(2), block.SignedHeader.Header.Height())

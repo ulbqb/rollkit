@@ -7,6 +7,8 @@ import (
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/types"
+
+	rollabci "github.com/rollkit/rollkit/abci/types"
 )
 
 // Mempool defines the mempool interface.
@@ -16,7 +18,7 @@ import (
 type Mempool interface {
 	// CheckTx executes a new transaction against the application to determine
 	// its validity and whether it should be added to the mempool.
-	CheckTx(tx types.Tx, callback func(*abci.Response), txInfo TxInfo) error
+	CheckTx(tx types.Tx, callback func(*rollabci.Response), txInfo TxInfo) error
 
 	// RemoveTxByKey removes a transaction, identified by its key,
 	// from the mempool.

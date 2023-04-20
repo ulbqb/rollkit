@@ -11,11 +11,12 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/libs/log"
-	"github.com/tendermint/tendermint/proxy"
 	"github.com/tendermint/tendermint/types"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/mempool"
 	"github.com/rollkit/rollkit/mempool/clist"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 )
 
 var _ mempool.Mempool = (*TxMempool)(nil)
@@ -36,7 +37,7 @@ type TxMempool struct {
 	// Immutable fields
 	logger       log.Logger
 	config       *config.MempoolConfig
-	proxyAppConn proxy.AppConnMempool
+	proxyAppConn rollproxy.AppConnMempool
 	metrics      *mempool.Metrics
 	cache        mempool.TxCache // seen transactions
 
@@ -62,7 +63,7 @@ type TxMempool struct {
 func NewTxMempool(
 	logger log.Logger,
 	cfg *config.MempoolConfig,
-	proxyAppConn proxy.AppConnMempool,
+	proxyAppConn rollproxy.AppConnMempool,
 	height int64,
 	options ...TxMempoolOption,
 ) *TxMempool {
@@ -176,7 +177,7 @@ func (txmp *TxMempool) TxsAvailable() <-chan struct{} { return txmp.txsAvailable
 // is (strictly) lower than the priority of tx and whose size together exceeds
 // the size of tx, and adds tx instead. If no such transactions exist, tx is
 // discarded.
-func (txmp *TxMempool) CheckTx(tx types.Tx, cb func(*abci.Response), txInfo mempool.TxInfo) error {
+func (txmp *TxMempool) CheckTx(tx types.Tx, cb func(*rollabci.Response), txInfo mempool.TxInfo) error {
 
 	// During the initial phase of CheckTx, we do not need to modify any state.
 	// A transaction will not actually be added to the mempool until it survives
@@ -230,7 +231,7 @@ func (txmp *TxMempool) CheckTx(tx types.Tx, cb func(*abci.Response), txInfo memp
 	if err := txmp.proxyAppConn.FlushSync(); err != nil {
 		return err
 	}
-	reqRes.SetCallback(func(res *abci.Response) {
+	reqRes.SetCallback(func(res *rollabci.Response) {
 		wtx := &WrappedTx{
 			tx:        tx,
 			hash:      tx.Key(),
@@ -463,8 +464,8 @@ func (txmp *TxMempool) Update(
 // transactions are evicted.
 //
 // Finally, the new transaction is added and size stats updated.
-func (txmp *TxMempool) initialTxCallback(wtx *WrappedTx, res *abci.Response) {
-	checkTxRes, ok := res.Value.(*abci.Response_CheckTx)
+func (txmp *TxMempool) initialTxCallback(wtx *WrappedTx, res *rollabci.Response) {
+	checkTxRes, ok := res.Value.(*rollabci.Response_CheckTx)
 	if !ok {
 		txmp.logger.Error("mempool: received incorrect result type in CheckTx callback",
 			"expected", reflect.TypeOf(&abci.Response_CheckTx{}).Name(),
@@ -636,8 +637,8 @@ func (txmp *TxMempool) insertTx(wtx *WrappedTx) {
 //
 // This callback is NOT executed for the initial CheckTx on a new transaction;
 // that case is handled by initialTxCallback instead.
-func (txmp *TxMempool) recheckTxCallback(req *abci.Request, res *abci.Response) {
-	checkTxRes, ok := res.Value.(*abci.Response_CheckTx)
+func (txmp *TxMempool) recheckTxCallback(req *rollabci.Request, res *rollabci.Response) {
+	checkTxRes, ok := res.Value.(*rollabci.Response_CheckTx)
 	if !ok {
 		// Don't log this; this is the default callback and other response types
 		// can safely be ignored.

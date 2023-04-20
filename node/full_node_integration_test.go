@@ -19,14 +19,15 @@ import (
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
-	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/da"
 	mockda "github.com/rollkit/rollkit/da/mock"
 	"github.com/rollkit/rollkit/mocks"
 	"github.com/rollkit/rollkit/p2p"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/types"
 )
@@ -42,7 +43,7 @@ func TestAggregatorMode(t *testing.T) {
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
 	app.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
 	app.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
-	app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
+	app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	anotherKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
@@ -51,7 +52,7 @@ func TestAggregatorMode(t *testing.T) {
 		BlockTime:   1 * time.Second,
 		NamespaceID: types.NamespaceID{1, 2, 3, 4, 5, 6, 7, 8},
 	}
-	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock", Aggregator: true, BlockManagerConfig: blockManagerConfig}, key, signingKey, proxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock", Aggregator: true, BlockManagerConfig: blockManagerConfig}, key, signingKey, rollproxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -143,7 +144,7 @@ func TestLazyAggregator(t *testing.T) {
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
 	app.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
 	app.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
-	app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
+	app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
 
 	key, _, _ := crypto.GenerateEd25519Key(rand.Reader)
 	genesisValidators, signingKey := getGenesisValidatorSetWithSigner(1)
@@ -157,7 +158,7 @@ func TestLazyAggregator(t *testing.T) {
 		Aggregator:         true,
 		BlockManagerConfig: blockManagerConfig,
 		LazyAggregator:     true,
-	}, key, signingKey, proxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
+	}, key, signingKey, rollproxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators}, log.TestingLogger())
 	assert.False(node.IsRunning())
 	assert.NoError(err)
 	err = node.Start()
@@ -519,13 +520,13 @@ func createNode(ctx context.Context, n int, isMalicious bool, aggregator bool, d
 	maliciousAppHash := []byte{9, 8, 7, 6}
 	nonMaliciousAppHash := []byte{1, 2, 3, 4}
 	if isMalicious && aggregator {
-		app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{AppHash: maliciousAppHash})
+		app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{AppHash: maliciousAppHash})
 	} else {
-		app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{AppHash: nonMaliciousAppHash})
+		app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{AppHash: nonMaliciousAppHash})
 	}
 
 	if isMalicious && !aggregator {
-		app.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{FraudProof: &abci.FraudProof{}})
+		app.On("GenerateFraudProof", mock.Anything).Return(rollabci.ResponseGenerateFraudProof{FraudProof: &rollabci.FraudProof{}})
 	}
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{}).Run(func(args mock.Arguments) {
 		wg.Done()
@@ -545,7 +546,7 @@ func createNode(ctx context.Context, n int, isMalicious bool, aggregator bool, d
 		},
 		keys[n],
 		signingKey,
-		proxy.NewLocalClientCreator(app),
+		rollproxy.NewLocalClientCreator(app),
 		&tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators},
 		log.TestingLogger().With("node", n))
 	require.NoError(err)

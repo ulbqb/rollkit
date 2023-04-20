@@ -24,15 +24,16 @@ import (
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/p2p"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"github.com/tendermint/tendermint/version"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/config"
 	"github.com/rollkit/rollkit/conv"
 	abciconv "github.com/rollkit/rollkit/conv/abci"
 	mockda "github.com/rollkit/rollkit/da/mock"
 	"github.com/rollkit/rollkit/mocks"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/store"
 	"github.com/rollkit/rollkit/types"
 )
@@ -120,7 +121,7 @@ func TestGenesisChunked(t *testing.T) {
 	mockApp.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	privKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	n, _ := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, privKey, signingKey, proxy.NewLocalClientCreator(mockApp), genDoc, log.TestingLogger())
+	n, _ := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, privKey, signingKey, rollproxy.NewLocalClientCreator(mockApp), genDoc, log.TestingLogger())
 
 	rpc := NewFullClient(n)
 
@@ -436,7 +437,7 @@ func TestTx(t *testing.T) {
 		BlockManagerConfig: config.BlockManagerConfig{
 			BlockTime: 1 * time.Second, // blocks must be at least 1 sec apart for adjacent headers to get verified correctly
 		}},
-		key, signingKey, proxy.NewLocalClientCreator(mockApp),
+		key, signingKey, rollproxy.NewLocalClientCreator(mockApp),
 		&tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators},
 		log.TestingLogger())
 	require.NoError(err)
@@ -449,8 +450,8 @@ func TestTx(t *testing.T) {
 	mockApp.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
 	mockApp.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
 	mockApp.On("CheckTx", mock.Anything).Return(abci.ResponseCheckTx{})
-	mockApp.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
-	mockApp.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{})
+	mockApp.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
+	mockApp.On("GenerateFraudProof", mock.Anything).Return(rollabci.ResponseGenerateFraudProof{})
 
 	err = rpc.node.Start()
 	require.NoError(err)
@@ -688,7 +689,7 @@ func createGenesisValidators(numNodes int, appCreator func(vKeyToRemove tmcrypto
 			},
 			signingKey,
 			signingKey,
-			proxy.NewLocalClientCreator(apps[i]),
+			rollproxy.NewLocalClientCreator(apps[i]),
 			&tmtypes.GenesisDoc{ChainID: "test", Validators: genesisValidators},
 			log.TestingLogger(),
 		)
@@ -724,8 +725,8 @@ func TestValidatorSetHandling(t *testing.T) {
 		app.On("CheckTx", mock.Anything).Return(abci.ResponseCheckTx{})
 		app.On("BeginBlock", mock.Anything).Return(abci.ResponseBeginBlock{})
 		app.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
-		app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
-		app.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{})
+		app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
+		app.On("GenerateFraudProof", mock.Anything).Return(rollabci.ResponseGenerateFraudProof{})
 
 		pbValKey, err := encoding.PubKeyToProto(vKeyToRemove.PubKey())
 		require.NoError(err)
@@ -799,8 +800,8 @@ func TestValidatorSetHandlingBased(t *testing.T) {
 		app.On("CheckTx", mock.Anything).Return(abci.ResponseCheckTx{})
 		app.On("BeginBlock", mock.Anything).Return(abci.ResponseBeginBlock{})
 		app.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
-		app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
-		app.On("GenerateFraudProof", mock.Anything).Return(abci.ResponseGenerateFraudProof{})
+		app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
+		app.On("GenerateFraudProof", mock.Anything).Return(rollabci.ResponseGenerateFraudProof{})
 
 		pbValKey, err := encoding.PubKeyToProto(vKeyToRemove.PubKey())
 		require.NoError(err)
@@ -928,7 +929,7 @@ func getRPC(t *testing.T) (*mocks.Application, *FullClient) {
 	app.On("InitChain", mock.Anything).Return(abci.ResponseInitChain{})
 	key, _, _ := crypto.GenerateEd25519Key(crand.Reader)
 	signingKey, _, _ := crypto.GenerateEd25519Key(crand.Reader)
-	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, proxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	node, err := newFullNode(context.Background(), config.NodeConfig{DALayer: "mock"}, key, signingKey, rollproxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node)
 
@@ -997,7 +998,7 @@ func TestMempool2Nodes(t *testing.T) {
 	app.On("EndBlock", mock.Anything).Return(abci.ResponseEndBlock{})
 	app.On("Commit", mock.Anything).Return(abci.ResponseCommit{})
 	app.On("DeliverTx", mock.Anything).Return(abci.ResponseDeliverTx{})
-	app.On("GetAppHash", mock.Anything).Return(abci.ResponseGetAppHash{})
+	app.On("GetAppHash", mock.Anything).Return(rollabci.ResponseGetAppHash{})
 
 	// make node1 an aggregator, so that node2 can start gracefully
 	node1, err := newFullNode(context.Background(), config.NodeConfig{
@@ -1009,7 +1010,7 @@ func TestMempool2Nodes(t *testing.T) {
 		BlockManagerConfig: config.BlockManagerConfig{
 			BlockTime: 1 * time.Second,
 		},
-	}, key1, signingKey1, proxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	}, key1, signingKey1, rollproxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node1)
 
@@ -1019,7 +1020,7 @@ func TestMempool2Nodes(t *testing.T) {
 			ListenAddress: "/ip4/127.0.0.1/tcp/9002",
 			Seeds:         "/ip4/127.0.0.1/tcp/9001/p2p/" + id1.Pretty(),
 		},
-	}, key2, signingKey2, proxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
+	}, key2, signingKey2, rollproxy.NewLocalClientCreator(app), &tmtypes.GenesisDoc{ChainID: "test"}, log.TestingLogger())
 	require.NoError(err)
 	require.NotNil(node1)
 
@@ -1104,7 +1105,7 @@ func TestStatus(t *testing.T) {
 		},
 		key,
 		signingKey,
-		proxy.NewLocalClientCreator(app),
+		rollproxy.NewLocalClientCreator(app),
 		&tmtypes.GenesisDoc{
 			ChainID:    "test",
 			Validators: genesisValidators,
@@ -1204,7 +1205,7 @@ func TestFutureGenesisTime(t *testing.T) {
 			BlockTime: 200 * time.Millisecond,
 		}},
 		key, signingKey,
-		proxy.NewLocalClientCreator(mockApp),
+		rollproxy.NewLocalClientCreator(mockApp),
 		&tmtypes.GenesisDoc{
 			ChainID:       "test",
 			InitialHeight: 1,

@@ -16,20 +16,21 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tendermint/tendermint/abci/example/code"
-	"github.com/tendermint/tendermint/abci/example/kvstore"
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/config"
 	"github.com/tendermint/tendermint/libs/log"
-	"github.com/tendermint/tendermint/proxy"
 	"github.com/tendermint/tendermint/types"
 
+	rollkvstore "github.com/rollkit/rollkit/abci/example/kvstore"
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	"github.com/rollkit/rollkit/mempool"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 )
 
 // application extends the KV store application by overriding CheckTx to provide
 // transaction priority based on the value in the key/value pair.
 type application struct {
-	*kvstore.Application
+	*rollkvstore.Application
 }
 
 type testTx struct {
@@ -76,8 +77,8 @@ func (app *application) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 func setup(t testing.TB, cacheSize int, options ...TxMempoolOption) *TxMempool {
 	t.Helper()
 
-	app := &application{kvstore.NewApplication()}
-	cc := proxy.NewLocalClientCreator(app)
+	app := &application{rollkvstore.NewApplication()}
+	cc := rollproxy.NewLocalClientCreator(app)
 
 	cfg := config.ResetTestRoot(strings.ReplaceAll(t.Name(), "/", "|"))
 	cfg.Mempool.CacheSize = cacheSize
@@ -98,7 +99,7 @@ func setup(t testing.TB, cacheSize int, options ...TxMempoolOption) *TxMempool {
 // its callback has finished executing. It fails t if CheckTx fails.
 func mustCheckTx(t *testing.T, txmp *TxMempool, spec string) {
 	done := make(chan struct{})
-	if err := txmp.CheckTx([]byte(spec), func(*abci.Response) {
+	if err := txmp.CheckTx([]byte(spec), func(*rollabci.Response) {
 		close(done)
 	}, mempool.TxInfo{}); err != nil {
 		t.Fatalf("CheckTx for %q failed: %v", spec, err)
@@ -640,8 +641,8 @@ func TestTxMempool_CheckTxPostCheckError(t *testing.T) {
 			_, err := rng.Read(tx)
 			require.NoError(t, err)
 
-			callback := func(res *abci.Response) {
-				checkTxRes, ok := res.Value.(*abci.Response_CheckTx)
+			callback := func(res *rollabci.Response) {
+				checkTxRes, ok := res.Value.(*rollabci.Response_CheckTx)
 				require.True(t, ok)
 				expectedErrString := ""
 				if testCase.err != nil {

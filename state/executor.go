@@ -12,13 +12,14 @@ import (
 	tmbytes "github.com/tendermint/tendermint/libs/bytes"
 	tmstate "github.com/tendermint/tendermint/proto/tendermint/state"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
-	"github.com/tendermint/tendermint/proxy"
 	tmtypes "github.com/tendermint/tendermint/types"
 	"go.uber.org/multierr"
 
+	rollabci "github.com/rollkit/rollkit/abci/types"
 	abciconv "github.com/rollkit/rollkit/conv/abci"
 	"github.com/rollkit/rollkit/log"
 	"github.com/rollkit/rollkit/mempool"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 	"github.com/rollkit/rollkit/types"
 )
 
@@ -30,7 +31,7 @@ type BlockExecutor struct {
 	proposerAddress    []byte
 	namespaceID        types.NamespaceID
 	chainID            string
-	proxyApp           proxy.AppConnConsensus
+	proxyApp           rollproxy.AppConnConsensus
 	mempool            mempool.Mempool
 	fraudProofsEnabled bool
 
@@ -38,12 +39,12 @@ type BlockExecutor struct {
 
 	logger log.Logger
 
-	FraudProofOutCh chan *abci.FraudProof
+	FraudProofOutCh chan *rollabci.FraudProof
 }
 
 // NewBlockExecutor creates new instance of BlockExecutor.
 // Proposer address and namespace ID will be used in all newly created blocks.
-func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID string, mempool mempool.Mempool, proxyApp proxy.AppConnConsensus, fraudProofsEnabled bool, eventBus *tmtypes.EventBus, logger log.Logger) *BlockExecutor {
+func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID string, mempool mempool.Mempool, proxyApp rollproxy.AppConnConsensus, fraudProofsEnabled bool, eventBus *tmtypes.EventBus, logger log.Logger) *BlockExecutor {
 	return &BlockExecutor{
 		proposerAddress:    proposerAddress,
 		namespaceID:        namespaceID,
@@ -53,7 +54,7 @@ func NewBlockExecutor(proposerAddress []byte, namespaceID [8]byte, chainID strin
 		fraudProofsEnabled: fraudProofsEnabled,
 		eventBus:           eventBus,
 		logger:             logger,
-		FraudProofOutCh:    make(chan *abci.FraudProof),
+		FraudProofOutCh:    make(chan *rollabci.FraudProof),
 	}
 }
 
@@ -189,9 +190,9 @@ func (e *BlockExecutor) Commit(ctx context.Context, state types.State, block *ty
 	return appHash, retainHeight, nil
 }
 
-func (e *BlockExecutor) VerifyFraudProof(fraudProof *abci.FraudProof, expectedValidAppHash []byte) (bool, error) {
+func (e *BlockExecutor) VerifyFraudProof(fraudProof *rollabci.FraudProof, expectedValidAppHash []byte) (bool, error) {
 	resp, err := e.proxyApp.VerifyFraudProofSync(
-		abci.RequestVerifyFraudProof{
+		rollabci.RequestVerifyFraudProof{
 			FraudProof:           fraudProof,
 			ExpectedValidAppHash: expectedValidAppHash,
 		},
@@ -327,8 +328,8 @@ func (e *BlockExecutor) execute(ctx context.Context, state types.State, block *t
 
 	ISRs := make([][]byte, 0)
 
-	e.proxyApp.SetResponseCallback(func(req *abci.Request, res *abci.Response) {
-		if r, ok := res.Value.(*abci.Response_DeliverTx); ok {
+	e.proxyApp.SetResponseCallback(func(req *rollabci.Request, res *rollabci.Response) {
+		if r, ok := res.Value.(*rollabci.Response_DeliverTx); ok {
 			txRes := r.DeliverTx
 			if txRes.Code == abci.CodeTypeOK {
 				validTxs++
@@ -436,8 +437,8 @@ func (e *BlockExecutor) isFraudProofTrigger(generatedIsr []byte, currentIsrs [][
 	return false
 }
 
-func (e *BlockExecutor) generateFraudProof(beginBlockRequest *abci.RequestBeginBlock, deliverTxRequests []*abci.RequestDeliverTx, endBlockRequest *abci.RequestEndBlock) (*abci.FraudProof, error) {
-	generateFraudProofRequest := abci.RequestGenerateFraudProof{}
+func (e *BlockExecutor) generateFraudProof(beginBlockRequest *abci.RequestBeginBlock, deliverTxRequests []*abci.RequestDeliverTx, endBlockRequest *abci.RequestEndBlock) (*rollabci.FraudProof, error) {
+	generateFraudProofRequest := rollabci.RequestGenerateFraudProof{}
 	if beginBlockRequest == nil {
 		return nil, fmt.Errorf("begin block request cannot be a nil parameter")
 	}
@@ -509,7 +510,7 @@ func (e *BlockExecutor) publishEvents(resp *tmstate.ABCIResponses, block *types.
 }
 
 func (e *BlockExecutor) getAppHash() ([]byte, error) {
-	isrResp, err := e.proxyApp.GetAppHashSync(abci.RequestGetAppHash{})
+	isrResp, err := e.proxyApp.GetAppHashSync(rollabci.RequestGetAppHash{})
 	if err != nil {
 		return nil, err
 	}

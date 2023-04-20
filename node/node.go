@@ -6,11 +6,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 
 	"github.com/tendermint/tendermint/libs/log"
-	proxy "github.com/tendermint/tendermint/proxy"
 	rpcclient "github.com/tendermint/tendermint/rpc/client"
 	tmtypes "github.com/tendermint/tendermint/types"
 
 	"github.com/rollkit/rollkit/config"
+	rollproxy "github.com/rollkit/rollkit/proxy"
 )
 
 type Node interface {
@@ -27,7 +27,7 @@ func NewNode(
 	conf config.NodeConfig,
 	p2pKey crypto.PrivKey,
 	signingKey crypto.PrivKey,
-	appClient proxy.ClientCreator,
+	appClient rollproxy.ClientCreator,
 	genesis *tmtypes.GenesisDoc,
 	logger log.Logger,
 ) (Node, error) {
